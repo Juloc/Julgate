@@ -4228,7 +4228,7 @@ public sealed class HtmlViews
                     if (!document.documentElement.classList.contains('session-immersive')) {
                         return;
                     }
-                    if (event.clientY <= 2) {
+                    if (event.clientY <= 6) {
                         openImmersiveBar();
                     }
                     else if (document.documentElement.classList.contains('immersive-bar-open')
@@ -7893,6 +7893,10 @@ public sealed class HtmlViews
                         height: var(--matgate-viewport-height, 100vh);
                         overflow: hidden;
                         overscroll-behavior: none;
+                        /* Root canvas matches the chrome bars (header + statusbar are --surface) so any
+                           safe-area/rounded-corner letterbox (esp. the iPad windowed bottom edge) blends
+                           into the statusbar instead of showing the darker page background. */
+                        background: var(--surface);
                     }
                     body[data-shell-layout="1"] {
                         display: flex;
@@ -9707,29 +9711,43 @@ public sealed class HtmlViews
                         transform: translateY(0);
                     }
                     .immersive-handle { display: none; }
+                    /* Full-width slim reveal strip pinned to the very top edge: a large, unmissable hit
+                       target for BOTH mouse and touch (tap/click anywhere on it), with a centered grabber
+                       + chevron so it is discoverable, yet thin enough to barely cover the session.
+                       Tap it, swipe down from the top, or move the mouse to the top edge to reveal the bar. */
                     html.session-immersive .immersive-handle {
-                        align-items: center;
-                        background: rgba(20, 22, 20, .72);
-                        border: 1px solid var(--line);
-                        border-top: 0;
-                        border-radius: 0 0 12px 12px;
-                        color: #fff;
+                        align-items: flex-end;
+                        background: linear-gradient(to bottom, rgba(18, 20, 18, .66), rgba(18, 20, 18, 0));
+                        border: 0;
+                        color: rgba(255, 255, 255, .9);
                         cursor: pointer;
-                        display: inline-flex;
-                        height: 24px;
+                        display: flex;
+                        gap: 6px;
+                        height: calc(20px + env(safe-area-inset-top));
                         justify-content: center;
-                        opacity: .55;
+                        left: 0;
+                        opacity: 1;
+                        padding-bottom: 3px;
                         position: fixed;
-                        right: calc(12px + env(safe-area-inset-right));
-                        top: env(safe-area-inset-top);
-                        width: 56px;
+                        right: 0;
+                        top: 0;
                         z-index: 66;
                     }
+                    /* A short "pull" grabber to the left of the chevron makes the strip read as draggable. */
+                    html.session-immersive .immersive-handle::before {
+                        background: rgba(255, 255, 255, .7);
+                        border-radius: 999px;
+                        content: '';
+                        height: 4px;
+                        width: 34px;
+                    }
                     html.session-immersive .immersive-handle:hover,
-                    html.session-immersive .immersive-handle:active { opacity: 1; }
-                    html.session-immersive .immersive-handle .icon { height: 16px; width: 16px; transition: transform .2s ease; }
+                    html.session-immersive .immersive-handle:active { color: #fff; }
+                    html.session-immersive .immersive-handle:hover::before,
+                    html.session-immersive .immersive-handle:active::before { background: #fff; }
+                    html.session-immersive .immersive-handle .icon { height: 14px; width: 14px; transition: transform .2s ease; }
                     /* While the toolbar is revealed it carries its own controls (incl. the fullscreen
-                       exit) and auto-hides on inactivity, so the corner handle just gets out of the way. */
+                       exit) and auto-hides on inactivity, so the reveal strip just gets out of the way. */
                     html.session-immersive.immersive-bar-open .immersive-handle {
                         opacity: 0;
                         pointer-events: none;
