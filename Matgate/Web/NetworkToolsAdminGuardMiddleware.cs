@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 
@@ -35,7 +36,7 @@ public sealed class NetworkToolsAdminGuardMiddleware
         }
 
         context.User = authentication.Principal;
-        if (!context.User.IsInRole("Admin"))
+        if (!IsAdministrator(context.User))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.Response.ContentType = "text/plain; charset=utf-8";
@@ -52,5 +53,12 @@ public sealed class NetworkToolsAdminGuardMiddleware
     {
         return path.StartsWithSegments("/tools")
             || path.StartsWithSegments("/api/tools");
+    }
+
+    internal static bool IsAdministrator(ClaimsPrincipal principal)
+    {
+        return principal.Claims.Any(claim =>
+            claim.Type == ClaimTypes.Role
+            && string.Equals(claim.Value, "admin", StringComparison.OrdinalIgnoreCase));
     }
 }
