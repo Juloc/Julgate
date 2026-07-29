@@ -14,8 +14,8 @@ public sealed class SecurityTests
 
         var protectedValue = protector.Protect("server-password");
 
-        Assert.StartsWith("julgate-protected:v1:", protectedValue, StringComparison.Ordinal);
-        Assert.DoesNotContain("server-password", protectedValue, StringComparison.Ordinal);
+        Assert.True(protectedValue.StartsWith("julgate-protected:v1:", StringComparison.Ordinal));
+        Assert.False(protectedValue.Contains("server-password", StringComparison.Ordinal));
         Assert.Equal("server-password", protector.Unprotect(protectedValue));
         Assert.Equal(protectedValue, protector.Protect(protectedValue));
     }
