@@ -103,6 +103,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<CredentialProtector>();
 builder.Services.AddSingleton<JsonDataStore>();
+builder.Services.AddSingleton<SecurityAuditService>();
 builder.Services.AddSingleton<GuacamoleConfigWriter>();
 builder.Services.AddSingleton<HtmlViews>();
 builder.Services.AddSingleton<GuacamoleLauncher>();
@@ -184,6 +185,17 @@ app.UseWebSockets(new WebSocketOptions
 });
 app.UseAuthentication();
 app.UseAuthorization();
+app.Use(async (context, next) =>
+{
+    var action = GetAuditAction(context.Request);
+    await next();
+
+    if (action is not null && context.User.Identity?.IsAuthenticated == true)
+    {
+        var audit = context.RequestServices.GetRequiredService<SecurityAuditService>();
+        await audit.WriteRequestAsync(context, action, context.RequestAborted);
+    }
+});
 
 var hasher = app.Services.GetRequiredService<PasswordHasher>();
 var store = app.Services.GetRequiredService<JsonDataStore>();
@@ -199,6 +211,23 @@ app.MapGet("/healthz", () => Results.Ok(new { status = "healthy", service = "jul
 app.MapMatgateEndpoints();
 
 await app.RunAsync();
+
+static string? GetAuditAction(HttpRequest request)
+{
+    if (IsUnsafeMethod(request.Method))
+    {
+        return "state-change";
+    }
+
+    if (HttpMethods.IsGet(request.Method)
+        && (request.Path.StartsWithSegments("/connect")
+            || request.Path.StartsWithSegments("/sessions")))
+    {
+        return "session-access";
+    }
+
+    return null;
+}
 
 static bool IsUnsafeMethod(string method)
 {
