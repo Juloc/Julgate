@@ -33,13 +33,20 @@ jobs:
 
       - name: Validate Compose files
         env:
-          JULGATE_ADMIN_PASSWORD: ci-only-password-with-16-characters
-          JULGATE_CREDENTIAL_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
           JULGATE_GUACAMOLE_JSON_SECRET_KEY: fedcba98765432100123456789abcdef
+        shell: bash
         run: |
+          set -euo pipefail
+          mkdir -p secrets
+          printf '%s' 'ci-only-password-with-16-characters' > secrets/julgate_admin_password
+          printf '%s' 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' > secrets/julgate_credential_key
+
           docker compose -f docker-compose.yml config >/dev/null
           docker compose -f docker-compose-simple.yaml config >/dev/null
           docker compose -f docker-compose-dockhand.yaml config >/dev/null
+          docker compose -f docker-compose.yml -f docker-compose-secrets.yaml config >/dev/null
+          docker compose -f docker-compose-simple.yaml -f docker-compose-secrets.yaml config >/dev/null
+          docker compose -f docker-compose-dockhand.yaml -f docker-compose-secrets.yaml config >/dev/null
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -55,10 +62,8 @@ jobs:
       - name: Test
         run: dotnet test Matgate.slnx --configuration Release --no-build --logger "console;verbosity=normal"
 
-      - name: Start hardened stack and smoke test
+      - name: Start hardened secret stack and smoke test
         env:
-          JULGATE_ADMIN_PASSWORD: ci-only-password-with-16-characters
-          JULGATE_CREDENTIAL_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
           JULGATE_GUACAMOLE_JSON_SECRET_KEY: fedcba98765432100123456789abcdef
           JULGATE_BIND_ADDRESS: 127.0.0.1
           JULGATE_PORT: 8088
@@ -68,13 +73,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          compose=(docker compose -f docker-compose.yml -f docker-compose-secrets.yaml)
           cleanup() {
-            docker compose logs --no-color || true
-            docker compose down --volumes --remove-orphans || true
+            "${compose[@]}" logs --no-color || true
+            "${compose[@]}" down --volumes --remove-orphans || true
+            rm -rf secrets
           }
           trap cleanup EXIT
 
-          docker compose up --detach --build
+          mkdir -p secrets
+          printf '%s' 'ci-only-password-with-16-characters' > secrets/julgate_admin_password
+          printf '%s' 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' > secrets/julgate_credential_key
+
+          "${compose[@]}" up --detach --build
 
           ready=false
           for attempt in {1..45}; do
@@ -96,16 +107,21 @@ jobs:
             http://127.0.0.1:8088/guacamole/
           grep --ignore-case --quiet '^X-Content-Type-Options: nosniff' /tmp/julgate-headers.txt
           grep --quiet 'Julgate' /tmp/julgate-login.html
-          docker compose exec -T julgate sh -c \
+          "${compose[@]}" exec -T julgate sh -c \
+            'test -r /run/secrets/julgate_admin_password && test -r /run/secrets/julgate_credential_key'
+          "${compose[@]}" exec -T julgate sh -c \
             'test ! -e /data/user-mapping.xml && test ! -e /data/guacamole/user-mapping.xml'
 
           website_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8088/website/test)"
           tools_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8088/tools)"
+          archive_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --request POST http://127.0.0.1:8088/api/files/00000000-0000-0000-0000-000000000001/extract)"
           traversal_status="$(curl --silent --output /dev/null --write-out '%{http_code}' 'http://127.0.0.1:8088/?path=folder%252f..%252fsecret')"
           csrf_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --request POST --header 'Origin: https://evil.invalid' http://127.0.0.1:8088/login)"
           test "$website_status" = "404"
           test "$tools_status" = "404"
+          test "$archive_status" = "404"
           test "$traversal_status" = "400"
           test "$csrf_status" = "403"
 
@@ -140,21 +156,33 @@ jobs:
         id: version
         shell: bash
         run: |
+          set -euo pipefail
           base_version="$(sed -n 's/.*<VersionPrefix>\([^<]*\)<\/VersionPrefix>.*/\1/p' Matgate/Matgate.csproj | head -n 1)"
           if [[ -z "$base_version" ]]; then
-            base_version="0.1.0"
+            echo "VersionPrefix is missing."
+            exit 1
           fi
 
           build_time="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          publish=false
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
+            if [[ "$version" != "$base_version" ]]; then
+              echo "Tag v$version does not match VersionPrefix $base_version."
+              exit 1
+            fi
+            publish=true
+          elif [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            version="$base_version"
+            publish=true
           else
             version="${base_version}-ci.${GITHUB_RUN_NUMBER}"
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build_time=$build_time" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
 
       - name: Prepare image name
         id: image
@@ -165,7 +193,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: steps.version.outputs.publish == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -178,10 +206,9 @@ jobs:
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
-            type=ref,event=branch
-            type=raw,value=${{ steps.version.outputs.version }},enable=${{ github.event_name != 'pull_request' }}
+            type=raw,value=${{ steps.version.outputs.version }}
             type=sha,prefix=sha-
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and optionally push
         uses: docker/build-push-action@v6
@@ -192,7 +219,7 @@ jobs:
             JULGATE_VERSION=${{ steps.version.outputs.version }}
             JULGATE_BUILD_TAG=github
             JULGATE_BUILD_TIME=${{ steps.version.outputs.build_time }}
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ steps.version.outputs.publish == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
