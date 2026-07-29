@@ -17,9 +17,9 @@ public sealed class JsonDataStore
     {
         _logger = logger;
 
-        var configured = Environment.GetEnvironmentVariable("MATGATE_DATA_DIR")
+        var configured = FirstEnvironmentValue("JULGATE_DATA_DIR", "MATGATE_DATA_DIR")
             ?? configuration["Matgate:DataDirectory"];
-        var configuredWorkspaceRoot = Environment.GetEnvironmentVariable("MATGATE_WORKSPACE_ROOT")
+        var configuredWorkspaceRoot = FirstEnvironmentValue("JULGATE_WORKSPACE_ROOT", "MATGATE_WORKSPACE_ROOT")
             ?? configuration["Matgate:WorkspaceRoot"];
 
         DataDirectory = Path.GetFullPath(string.IsNullOrWhiteSpace(configured)
@@ -31,6 +31,8 @@ public sealed class JsonDataStore
 
         Directory.CreateDirectory(DataDirectory);
         Directory.CreateDirectory(WorkspaceRootDirectory);
+        SetPrivateDirectoryPermissions(DataDirectory);
+        SetPrivateDirectoryPermissions(WorkspaceRootDirectory);
     }
 
     public string DataDirectory { get; }
@@ -185,8 +187,21 @@ public sealed class JsonDataStore
         }
 
         var userName = PasswordHasher.NormalizeUserName(
-            Environment.GetEnvironmentVariable("MATGATE_ADMIN_USER") ?? "admin");
-        var password = Environment.GetEnvironmentVariable("MATGATE_ADMIN_PASSWORD") ?? "change-me-now";
+            FirstEnvironmentValue("JULGATE_ADMIN_USER", "MATGATE_ADMIN_USER") ?? "admin");
+        var password = FirstEnvironmentValue("JULGATE_ADMIN_PASSWORD", "MATGATE_ADMIN_PASSWORD");
+
+        if (!PasswordHasher.IsValidUserName(userName))
+        {
+            throw new InvalidOperationException("JULGATE_ADMIN_USER must contain 3 to 64 safe characters.");
+        }
+
+        if (string.IsNullOrWhiteSpace(password)
+            || password.Length < 16
+            || string.Equals(password, "change-me-now", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The first start requires JULGATE_ADMIN_PASSWORD with at least 16 characters. Default passwords are rejected.");
+        }
 
         await UpdateUsersAsync(current =>
         {
@@ -212,9 +227,7 @@ public sealed class JsonDataStore
             });
         }, cancellationToken);
 
-        logger.LogWarning(
-            "Seed admin user '{UserName}' was created. Change the default password immediately if MATGATE_ADMIN_PASSWORD was not set.",
-            userName);
+        logger.LogInformation("Initial Julgate administrator '{UserName}' was created.", userName);
     }
 
     public async Task EnsureGuacamoleSecretsAsync(PasswordHasher hasher, CancellationToken cancellationToken = default)
@@ -279,33 +292,85 @@ public sealed class JsonDataStore
             return [];
         }
 
+        SetPrivateFilePermissions(path);
         await using var stream = File.OpenRead(path);
         return await JsonSerializer.DeserializeAsync<List<T>>(stream, JsonOptions, cancellationToken) ?? [];
     }
 
     private static async Task WriteListAsync<T>(string path, List<T> values, CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var tempPath = path + ".tmp";
+        var directory = Path.GetDirectoryName(path)!;
+        Directory.CreateDirectory(directory);
+        SetPrivateDirectoryPermissions(directory);
 
-        await using (var stream = File.Create(tempPath))
+        var tempPath = path + ".tmp";
+        var backupPath = path + ".bak";
+
+        await using (var stream = new FileStream(
+                         tempPath,
+                         FileMode.Create,
+                         FileAccess.Write,
+                         FileShare.None,
+                         64 * 1024,
+                         FileOptions.Asynchronous | FileOptions.SequentialScan))
         {
             await JsonSerializer.SerializeAsync(stream, values, JsonOptions, cancellationToken);
             await stream.FlushAsync(cancellationToken);
         }
 
+        SetPrivateFilePermissions(tempPath);
+
+        if (File.Exists(path))
+        {
+            File.Copy(path, backupPath, overwrite: true);
+            SetPrivateFilePermissions(backupPath);
+        }
+
         File.Move(tempPath, path, overwrite: true);
+        SetPrivateFilePermissions(path);
     }
 
-    private static string ConfigValue(
-        IConfiguration configuration,
-        string environmentVariable,
-        string configurationKey,
-        string fallback)
+    private static string? FirstEnvironmentValue(params string[] names)
     {
-        var value = Environment.GetEnvironmentVariable(environmentVariable)
-            ?? configuration[configurationKey];
+        foreach (var name in names)
+        {
+            var value = Environment.GetEnvironmentVariable(name);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
 
-        return string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        return null;
+    }
+
+    private static void SetPrivateDirectoryPermissions(string path)
+    {
+        try
+        {
+            File.SetUnixFileMode(
+                path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        catch (PlatformNotSupportedException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static void SetPrivateFilePermissions(string path)
+    {
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch (PlatformNotSupportedException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 }
