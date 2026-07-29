@@ -10,6 +10,8 @@ services:
   edge:
     <<: *default-security
     image: caddy:2
+    cap_add:
+      - NET_BIND_SERVICE
     depends_on:
       - julgate
       - guacamole
@@ -48,6 +50,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       JULGATE_DATA_DIR: /data
       MATGATE_DATA_DIR: /data
+      JULGATE_GUACAMOLE_CONFIG_DIR: /guacamole-config
       JULGATE_ADMIN_USER: ${JULGATE_ADMIN_USER:-admin}
       JULGATE_ADMIN_PASSWORD: ${JULGATE_ADMIN_PASSWORD:?Set JULGATE_ADMIN_PASSWORD}
       JULGATE_CREDENTIAL_KEY: ${JULGATE_CREDENTIAL_KEY:?Set JULGATE_CREDENTIAL_KEY}
@@ -69,6 +72,7 @@ services:
       - ${JULGATE_DNS_SEARCH:-Schmoldt.local}
     volumes:
       - data:/data
+      - guacamole-config:/guacamole-config
     extra_hosts:
       - "host.docker.internal:host-gateway"
     read_only: true
@@ -86,6 +90,8 @@ services:
       - ${JULGATE_DNS_SERVER:-10.10.0.1}
     dns_search:
       - ${JULGATE_DNS_SEARCH:-Schmoldt.local}
+    volumes:
+      - drives:/drive
     networks:
       - backend
       - egress
@@ -97,13 +103,15 @@ services:
     depends_on:
       - guacd
       - julgate
+    group_add:
+      - "0"
     environment:
       GUACD_HOSTNAME: guacd
       GUACD_PORT: "4822"
       JSON_ENABLED: "true"
       JSON_SECRET_KEY: ${JULGATE_GUACAMOLE_JSON_SECRET_KEY:?Set JULGATE_GUACAMOLE_JSON_SECRET_KEY}
     volumes:
-      - data:/etc/guacamole
+      - guacamole-config:/etc/guacamole
     networks:
       - backend
     restart: unless-stopped
@@ -111,6 +119,10 @@ services:
 volumes:
   data:
     name: julgate-data
+  guacamole-config:
+    name: julgate-guacamole-config
+  drives:
+    name: julgate-drives
 
 networks:
   frontend:
