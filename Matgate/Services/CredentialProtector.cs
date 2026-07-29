@@ -13,7 +13,7 @@ public sealed class CredentialProtector : IDisposable
 
     public CredentialProtector(IConfiguration configuration)
         : this(
-            Environment.GetEnvironmentVariable("JULGATE_CREDENTIAL_KEY")
+            SecretValueReader.Read("JULGATE_CREDENTIAL_KEY")
             ?? configuration["Julgate:CredentialKey"]
             ?? "")
     {
@@ -28,7 +28,7 @@ public sealed class CredentialProtector : IDisposable
         catch (FormatException exception)
         {
             throw new InvalidOperationException(
-                "JULGATE_CREDENTIAL_KEY must be a Base64-encoded 32-byte random key.",
+                "JULGATE_CREDENTIAL_KEY or JULGATE_CREDENTIAL_KEY_FILE must provide a Base64-encoded 32-byte random key.",
                 exception);
         }
 
@@ -36,7 +36,7 @@ public sealed class CredentialProtector : IDisposable
         {
             CryptographicOperations.ZeroMemory(_key);
             throw new InvalidOperationException(
-                "JULGATE_CREDENTIAL_KEY must decode to exactly 32 bytes. Generate it with: openssl rand -base64 32");
+                "The Julgate credential key must decode to exactly 32 bytes. Generate it with: openssl rand -base64 32");
         }
     }
 
@@ -123,7 +123,7 @@ public sealed class CredentialProtector : IDisposable
     private static InvalidOperationException DecryptionFailure(Exception exception)
     {
         return new InvalidOperationException(
-            "A stored Julgate credential cannot be decrypted. Restore the matching JULGATE_CREDENTIAL_KEY.",
+            "A stored Julgate credential cannot be decrypted. Restore the matching credential key.",
             exception);
     }
 }
