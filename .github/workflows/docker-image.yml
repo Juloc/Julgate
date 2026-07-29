@@ -97,8 +97,10 @@ jobs:
 
           website_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8088/website/test)"
           tools_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8088/tools)"
+          traversal_status="$(curl --silent --output /dev/null --write-out '%{http_code}' 'http://127.0.0.1:8088/?path=folder%252f..%252fsecret')"
           test "$website_status" = "404"
           test "$tools_status" = "404"
+          test "$traversal_status" = "400"
 
       - name: Compute version
         id: version
