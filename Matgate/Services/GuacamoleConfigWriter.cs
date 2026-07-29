@@ -24,8 +24,13 @@ public sealed class GuacamoleConfigWriter
             .Where(server => server.IsEnabled && ServerEndpoint.IsGuacamoleProtocol(server.Protocol))
             .ToList();
 
-        var configHome = _store.DataDirectory;
+        var configuredDirectory = Environment.GetEnvironmentVariable("JULGATE_GUACAMOLE_CONFIG_DIR")
+            ?? _configuration["Guacamole:ConfigDirectory"];
+        var configHome = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredDirectory)
+            ? Path.Combine(_store.DataDirectory, "guacamole")
+            : configuredDirectory);
         Directory.CreateDirectory(configHome);
+        SetSharedDirectoryPermissions(configHome);
 
         await WritePropertiesAsync(configHome, cancellationToken);
         await WriteUserMappingAsync(configHome, users, enabledServers, cancellationToken);
@@ -62,7 +67,7 @@ public sealed class GuacamoleConfigWriter
             "enable-websocket: true",
             "");
 
-        await File.WriteAllTextAsync(Path.Combine(configHome, "guacamole.properties"), content, cancellationToken);
+        await WriteSharedTextAsync(Path.Combine(configHome, "guacamole.properties"), content, cancellationToken);
     }
 
     private static async Task WriteUserMappingAsync(
@@ -96,7 +101,10 @@ public sealed class GuacamoleConfigWriter
         }
 
         var document = new XDocument(new XDeclaration("1.0", "utf-8", null), root);
-        await File.WriteAllTextAsync(Path.Combine(configHome, "user-mapping.xml"), document.ToString(), cancellationToken);
+        await WriteSharedTextAsync(
+            Path.Combine(configHome, "user-mapping.xml"),
+            document.ToString(),
+            cancellationToken);
     }
 
     private static XElement BuildConnection(ServerEndpoint server)
@@ -133,20 +141,11 @@ public sealed class GuacamoleConfigWriter
                 : server.KeyboardLayout.Trim()));
             connection.Add(Param("resize-method", "reconnect"));
             connection.Add(Param("enable-wallpaper", "false"));
-
-            // Report as "Matgate" instead of the default "Guacamole" client name.
-            connection.Add(Param("client-name", "Matgate"));
-
-            // Shared drive redirection for file transfer (drag & drop / upload in Matgate).
+            connection.Add(Param("client-name", "Julgate"));
             connection.Add(Param("enable-drive", "true"));
-            connection.Add(Param("drive-name", "Matgate"));
+            connection.Add(Param("drive-name", "Julgate"));
             connection.Add(Param("create-drive-path", "true"));
             connection.Add(Param("drive-path", $"/drive/{server.Id:N}"));
-        }
-        else if (server.Protocol == ServerProtocol.Vnc)
-        {
-            // Standard outbound VNC connections only need the shared target
-            // password and the common hostname / port parameters above.
         }
         else if (server.Protocol == ServerProtocol.Ssh)
         {
@@ -160,5 +159,40 @@ public sealed class GuacamoleConfigWriter
     private static XElement Param(string name, string value)
     {
         return new XElement("param", new XAttribute("name", name), value);
+    }
+
+    private static async Task WriteSharedTextAsync(string path, string content, CancellationToken cancellationToken)
+    {
+        var tempPath = path + ".tmp";
+        await File.WriteAllTextAsync(tempPath, content, cancellationToken);
+        SetSharedFilePermissions(tempPath);
+        File.Move(tempPath, path, overwrite: true);
+        SetSharedFilePermissions(path);
+    }
+
+    private static void SetSharedDirectoryPermissions(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        File.SetUnixFileMode(
+            path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute);
+    }
+
+    private static void SetSharedFilePermissions(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        File.SetUnixFileMode(
+            path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite
+            | UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
     }
 }
