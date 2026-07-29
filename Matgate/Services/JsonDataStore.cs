@@ -12,10 +12,16 @@ public sealed class JsonDataStore
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ILogger<JsonDataStore> _logger;
+    private readonly CredentialProtector _credentials;
 
-    public JsonDataStore(IConfiguration configuration, IHostEnvironment environment, ILogger<JsonDataStore> logger)
+    public JsonDataStore(
+        IConfiguration configuration,
+        IHostEnvironment environment,
+        ILogger<JsonDataStore> logger,
+        CredentialProtector credentials)
     {
         _logger = logger;
+        _credentials = credentials;
 
         var configured = FirstEnvironmentValue("JULGATE_DATA_DIR", "MATGATE_DATA_DIR")
             ?? configuration["Matgate:DataDirectory"];
@@ -50,7 +56,7 @@ public sealed class JsonDataStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            return await ReadListAsync<MatgateUser>(UsersPath, cancellationToken);
+            return await ReadUsersAsync(cancellationToken);
         }
         finally
         {
@@ -63,7 +69,7 @@ public sealed class JsonDataStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            return await ReadListAsync<ServerEndpoint>(ServersPath, cancellationToken);
+            return await ReadServersAsync(cancellationToken);
         }
         finally
         {
@@ -111,6 +117,29 @@ public sealed class JsonDataStore
         }
     }
 
+    public async Task EnsureStoredCredentialsProtectedAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (File.Exists(UsersPath))
+            {
+                var users = await ReadUsersAsync(cancellationToken);
+                await WriteUsersAsync(users, cancellationToken);
+            }
+
+            if (File.Exists(ServersPath))
+            {
+                var servers = await ReadServersAsync(cancellationToken);
+                await WriteServersAsync(servers, cancellationToken);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task<MatgateUser?> FindUserByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         return (await GetUsersAsync(cancellationToken)).FirstOrDefault(user => user.Id == id);
@@ -138,9 +167,9 @@ public sealed class JsonDataStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            var users = await ReadListAsync<MatgateUser>(UsersPath, cancellationToken);
+            var users = await ReadUsersAsync(cancellationToken);
             update(users);
-            await WriteListAsync(UsersPath, users, cancellationToken);
+            await WriteUsersAsync(users, cancellationToken);
         }
         finally
         {
@@ -153,9 +182,9 @@ public sealed class JsonDataStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            var servers = await ReadListAsync<ServerEndpoint>(ServersPath, cancellationToken);
+            var servers = await ReadServersAsync(cancellationToken);
             update(servers);
-            await WriteListAsync(ServersPath, servers, cancellationToken);
+            await WriteServersAsync(servers, cancellationToken);
         }
         finally
         {
@@ -254,7 +283,7 @@ public sealed class JsonDataStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            var servers = await ReadListAsync<ServerEndpoint>(ServersPath, cancellationToken);
+            var servers = await ReadServersAsync(cancellationToken);
             var legacyServerIds = servers
                 .Where(server => server.Protocol == ServerProtocol.LegacyBrowser)
                 .Select(server => server.Id)
@@ -266,9 +295,9 @@ public sealed class JsonDataStore
             }
 
             servers.RemoveAll(server => server.Protocol == ServerProtocol.LegacyBrowser);
-            await WriteListAsync(ServersPath, servers, cancellationToken);
+            await WriteServersAsync(servers, cancellationToken);
 
-            var users = await ReadListAsync<MatgateUser>(UsersPath, cancellationToken);
+            var users = await ReadUsersAsync(cancellationToken);
             foreach (var user in users)
             {
                 user.FavoriteServerIds ??= [];
@@ -276,12 +305,76 @@ public sealed class JsonDataStore
                 user.FavoriteServerIds.RemoveAll(legacyServerIds.Contains);
             }
 
-            await WriteListAsync(UsersPath, users, cancellationToken);
+            await WriteUsersAsync(users, cancellationToken);
             _logger.LogInformation("Removed legacy gateway server entries from the data store.");
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    private async Task<List<MatgateUser>> ReadUsersAsync(CancellationToken cancellationToken)
+    {
+        var users = await ReadListAsync<MatgateUser>(UsersPath, cancellationToken);
+        foreach (var user in users)
+        {
+            user.GuacamolePassword = _credentials.Unprotect(user.GuacamolePassword);
+        }
+
+        return users;
+    }
+
+    private async Task<List<ServerEndpoint>> ReadServersAsync(CancellationToken cancellationToken)
+    {
+        var servers = await ReadListAsync<ServerEndpoint>(ServersPath, cancellationToken);
+        foreach (var server in servers)
+        {
+            server.Password = _credentials.Unprotect(server.Password);
+        }
+
+        return servers;
+    }
+
+    private async Task WriteUsersAsync(List<MatgateUser> users, CancellationToken cancellationToken)
+    {
+        var plainValues = users.Select(user => user.GuacamolePassword).ToArray();
+        try
+        {
+            for (var index = 0; index < users.Count; index++)
+            {
+                users[index].GuacamolePassword = _credentials.Protect(plainValues[index]);
+            }
+
+            await WriteListAsync(UsersPath, users, cancellationToken);
+        }
+        finally
+        {
+            for (var index = 0; index < users.Count; index++)
+            {
+                users[index].GuacamolePassword = plainValues[index];
+            }
+        }
+    }
+
+    private async Task WriteServersAsync(List<ServerEndpoint> servers, CancellationToken cancellationToken)
+    {
+        var plainValues = servers.Select(server => server.Password).ToArray();
+        try
+        {
+            for (var index = 0; index < servers.Count; index++)
+            {
+                servers[index].Password = _credentials.Protect(plainValues[index]);
+            }
+
+            await WriteListAsync(ServersPath, servers, cancellationToken);
+        }
+        finally
+        {
+            for (var index = 0; index < servers.Count; index++)
+            {
+                servers[index].Password = plainValues[index];
+            }
         }
     }
 
