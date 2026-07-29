@@ -132,7 +132,8 @@ public sealed class ServerEndpoint
         }
 
         if (!Uri.TryCreate(cleaned, UriKind.Absolute, out var uri)
-            || uri.Scheme is not (Uri.UriSchemeHttp or Uri.UriSchemeHttps)
+            || (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
             || string.IsNullOrWhiteSpace(uri.Host)
             || !string.IsNullOrWhiteSpace(uri.UserInfo)
             || IsBlockedWebsiteHost(uri.Host))
