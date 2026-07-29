@@ -58,7 +58,6 @@ services:
       ASPNETCORE_URLS: http://+:8080
       JULGATE_DATA_DIR: /data
       MATGATE_DATA_DIR: /data
-      JULGATE_GUACAMOLE_CONFIG_DIR: /guacamole-config
       JULGATE_ADMIN_USER: ${JULGATE_ADMIN_USER:-admin}
       JULGATE_ADMIN_PASSWORD: ${JULGATE_ADMIN_PASSWORD:?Set JULGATE_ADMIN_PASSWORD in .env}
       JULGATE_CREDENTIAL_KEY: ${JULGATE_CREDENTIAL_KEY:?Set JULGATE_CREDENTIAL_KEY in .env}
@@ -66,7 +65,7 @@ services:
       Guacamole__JsonSecretKey: ${JULGATE_GUACAMOLE_JSON_SECRET_KEY:?Set JULGATE_GUACAMOLE_JSON_SECRET_KEY in .env}
       Guacamole__PublicBasePath: /guacamole
       Guacamole__DirectLaunch: "true"
-      JULGATE_REQUIRE_SECURE_COOKIES: ${JULGATE_REQUIRE_SECURE_COOKIES:-false}
+      JULGATE_REQUIRE_SECURE_COOKIES: ${JULGATE_REQUIRE_SECURE_COOKIES:-true}
       JULGATE_TRUST_FORWARD_HEADERS: "true"
       JULGATE_SESSION_HOURS: ${JULGATE_SESSION_HOURS:-8}
       JULGATE_MAX_REQUEST_BODY_BYTES: ${JULGATE_MAX_REQUEST_BODY_BYTES:-536870912}
@@ -76,7 +75,6 @@ services:
       JULGATE_ENABLE_NETWORK_TOOLS: ${JULGATE_ENABLE_NETWORK_TOOLS:-false}
     volumes:
       - data:/data
-      - guacamole-config:/guacamole-config
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
@@ -104,16 +102,11 @@ services:
     image: guacamole/guacamole:1.6.0
     depends_on:
       - guacd
-      - julgate
-    group_add:
-      - "0"
     environment:
       GUACD_HOSTNAME: guacd
       GUACD_PORT: "4822"
       JSON_ENABLED: "true"
       JSON_SECRET_KEY: ${JULGATE_GUACAMOLE_JSON_SECRET_KEY:?Set JULGATE_GUACAMOLE_JSON_SECRET_KEY in .env}
-    volumes:
-      - guacamole-config:/etc/guacamole
     networks:
       - backend
     restart: unless-stopped
@@ -121,8 +114,6 @@ services:
 volumes:
   data:
     name: julgate-data
-  guacamole-config:
-    name: julgate-guacamole-config
   drives:
     name: julgate-drives
 
