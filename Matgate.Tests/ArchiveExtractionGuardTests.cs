@@ -16,15 +16,30 @@ public sealed class ArchiveExtractionGuardTests
         Assert.True(await ArchiveExtractionGuardMiddleware.IsExtractionRequestAsync(context.Request));
     }
 
-    [Fact]
-    public async Task UploadWithUnzipFlag_IsDetected()
+    [Theory]
+    [InlineData("true")]
+    [InlineData("TRUE")]
+    [InlineData("1")]
+    [InlineData("yes")]
+    [InlineData("on")]
+    public async Task UploadWithTruthyUnzipFlag_IsDetected(string value)
     {
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.ContentType = "application/x-www-form-urlencoded";
-        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("unzip=true"));
+        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes($"unzip={value}"));
 
         Assert.True(await ArchiveExtractionGuardMiddleware.IsExtractionRequestAsync(context.Request));
+    }
+
+    [Theory]
+    [InlineData("false")]
+    [InlineData("0")]
+    [InlineData("off")]
+    [InlineData("")]
+    public void FalseyUnzipFlag_IsNotDetected(string value)
+    {
+        Assert.False(ArchiveExtractionGuardMiddleware.IsTruthy(value));
     }
 
     [Fact]
