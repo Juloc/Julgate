@@ -22,6 +22,7 @@ var maxRequestBodySize = ReadPositiveLong("JULGATE_MAX_REQUEST_BODY_BYTES", 512L
 var sessionHours = Math.Clamp(ReadPositiveInt("JULGATE_SESSION_HOURS", 8), 1, 24);
 var requireSecureCookies = ReadBoolean("JULGATE_REQUIRE_SECURE_COOKIES", !builder.Environment.IsDevelopment());
 var trustForwardedHeaders = ReadBoolean("JULGATE_TRUST_FORWARD_HEADERS", true);
+var enableWebsiteProxy = ReadBoolean("JULGATE_ENABLE_WEBSITE_PROXY", false);
 
 Directory.CreateDirectory(keyDirectory);
 SetPrivateDirectoryPermissions(dataDirectory);
@@ -75,7 +76,7 @@ builder.Services.AddRateLimiter(options =>
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
     {
         var isLoginAttempt = HttpMethods.IsPost(context.Request.Method)
-            && context.Request.Path.Equals("/login", StringComparison.OrdinalIgnoreCase);
+            && string.Equals(context.Request.Path.Value, "/login", StringComparison.OrdinalIgnoreCase);
         var partition = $"{context.Connection.RemoteIpAddress ?? IPAddress.None}:{(isLoginAttempt ? "login" : "global")}";
 
         return RateLimitPartition.GetFixedWindowLimiter(partition, _ => new FixedWindowRateLimiterOptions
@@ -117,8 +118,15 @@ if (trustForwardedHeaders)
 
 app.Use(async (context, next) =>
 {
-    var isGatewayContent = context.Request.Path.StartsWithSegments("/guacamole")
-        || context.Request.Path.StartsWithSegments("/website");
+    var isWebsitePath = context.Request.Path.StartsWithSegments("/website");
+    var isGatewayContent = context.Request.Path.StartsWithSegments("/guacamole") || isWebsitePath;
+
+    if (isWebsitePath && !enableWebsiteProxy)
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        await context.Response.WriteAsync("Website proxy is disabled.");
+        return;
+    }
 
     context.Response.OnStarting(() =>
     {
