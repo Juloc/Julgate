@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace Matgate.Models;
 
 public sealed class ServerEndpoint
@@ -25,6 +27,12 @@ public sealed class ServerEndpoint
     ];
 
     private static readonly HashSet<string> AllowedIconKeys = new(IconKeys, StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> BlockedWebsiteHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "metadata.google.internal",
+        "metadata.azure.internal",
+        "instance-data.ec2.internal"
+    };
 
     public Guid Id { get; set; } = Guid.NewGuid();
 
@@ -123,12 +131,20 @@ public sealed class ServerEndpoint
             cleaned = $"https://{cleaned}";
         }
 
-        if (!Uri.TryCreate(cleaned, UriKind.Absolute, out var uri))
+        if (!Uri.TryCreate(cleaned, UriKind.Absolute, out var uri)
+            || uri.Scheme is not (Uri.UriSchemeHttp or Uri.UriSchemeHttps)
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || !string.IsNullOrWhiteSpace(uri.UserInfo)
+            || IsBlockedWebsiteHost(uri.Host))
         {
             return "";
         }
 
-        var builder = new UriBuilder(uri);
+        var builder = new UriBuilder(uri)
+        {
+            UserName = "",
+            Password = ""
+        };
         if (!builder.Path.EndsWith('/') && !Path.HasExtension(builder.Path))
         {
             builder.Path += "/";
@@ -147,5 +163,23 @@ public sealed class ServerEndpoint
     {
         var normalized = NormalizeIconKey(iconKey);
         return string.IsNullOrWhiteSpace(normalized) ? DefaultIconKey(protocol) : normalized;
+    }
+
+    private static bool IsBlockedWebsiteHost(string host)
+    {
+        if (BlockedWebsiteHosts.Contains(host))
+        {
+            return true;
+        }
+
+        if (!IPAddress.TryParse(host, out var address))
+        {
+            return false;
+        }
+
+        return address.Equals(IPAddress.Parse("169.254.169.254"))
+            || address.Equals(IPAddress.Parse("100.100.100.200"))
+            || address.Equals(IPAddress.Parse("168.63.129.16"))
+            || address.Equals(IPAddress.Parse("fd00:ec2::254"));
     }
 }
