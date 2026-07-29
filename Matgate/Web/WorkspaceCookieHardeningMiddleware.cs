@@ -2,13 +2,26 @@ using Microsoft.Extensions.Primitives;
 
 namespace Matgate.Web;
 
-public sealed class WorkspaceCookieHardeningMiddleware(RequestDelegate next)
+public sealed class WorkspaceCookieHardeningMiddleware
 {
     private static readonly string[] WorkspaceCookiePrefixes =
     [
         "Matgate.Workspace.",
         "Julgate.Workspace."
     ];
+
+    private readonly RequestDelegate _next;
+    private readonly bool _forceSecure;
+
+    public WorkspaceCookieHardeningMiddleware(RequestDelegate next, IConfiguration configuration)
+    {
+        _next = next;
+        _forceSecure = bool.TryParse(
+                Environment.GetEnvironmentVariable("JULGATE_REQUIRE_SECURE_COOKIES")
+                ?? configuration["Julgate:RequireSecureCookies"],
+                out var configured)
+            && configured;
+    }
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -20,13 +33,13 @@ public sealed class WorkspaceCookieHardeningMiddleware(RequestDelegate next)
             }
 
             var rewritten = values
-                .Select(value => Rewrite(value ?? "", context.Request.IsHttps))
+                .Select(value => Rewrite(value ?? "", context.Request.IsHttps || _forceSecure))
                 .ToArray();
             context.Response.Headers["Set-Cookie"] = new StringValues(rewritten);
             return Task.CompletedTask;
         });
 
-        await next(context);
+        await _next(context);
     }
 
     internal static string Rewrite(string header, bool isHttps)
