@@ -99,4 +99,24 @@ public sealed class SecurityTests
     {
         Assert.True(PathTraversalGuardMiddleware.IsUnsafeLeafName(value));
     }
+
+    [Fact]
+    public void WorkspaceCookie_IsStrictHttpOnlyAndSecureOnHttps()
+    {
+        var rewritten = WorkspaceCookieHardeningMiddleware.Rewrite(
+            "Matgate.Workspace.Access.example=value; path=/; samesite=lax; httponly",
+            isHttps: true);
+
+        Assert.Contains("SameSite=Strict", rewritten, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("HttpOnly", rewritten, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Secure", rewritten, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UnrelatedCookie_RemainsUnchanged()
+    {
+        const string cookie = "Other.Cookie=value; path=/; samesite=lax";
+
+        Assert.Equal(cookie, WorkspaceCookieHardeningMiddleware.Rewrite(cookie, isHttps: true));
+    }
 }
