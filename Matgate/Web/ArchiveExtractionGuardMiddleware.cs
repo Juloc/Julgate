@@ -48,11 +48,19 @@ public sealed class ArchiveExtractionGuardMiddleware
         {
             var form = await request.ReadFormAsync(request.HttpContext.RequestAborted);
             return form.TryGetValue("unzip", out var values)
-                && values.Any(value => bool.TryParse(value, out var unzip) && unzip);
+                && values.Any(IsTruthy);
         }
-        catch (InvalidDataException)
+        catch (Exception exception) when (exception is InvalidDataException or IOException or BadHttpRequestException)
         {
             return false;
         }
+    }
+
+    internal static bool IsTruthy(string? value)
+    {
+        return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "1", StringComparison.Ordinal)
+            || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
     }
 }
