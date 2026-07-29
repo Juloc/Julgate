@@ -98,9 +98,39 @@ jobs:
           website_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8088/website/test)"
           tools_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8088/tools)"
           traversal_status="$(curl --silent --output /dev/null --write-out '%{http_code}' 'http://127.0.0.1:8088/?path=folder%252f..%252fsecret')"
+          csrf_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --request POST --header 'Origin: https://evil.invalid' http://127.0.0.1:8088/login)"
           test "$website_status" = "404"
           test "$tools_status" = "404"
           test "$traversal_status" = "400"
+          test "$csrf_status" = "403"
+
+          login_status=""
+          for attempt in {1..11}; do
+            login_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --request POST http://127.0.0.1:8088/login)"
+          done
+          test "$login_status" = "429"
+
+          mkdir -p artifacts/ui
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          "$browser" \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --hide-scrollbars \
+            --window-size=1440,1000 \
+            --screenshot="$PWD/artifacts/ui/julgate-login.png" \
+            http://127.0.0.1:8088/login
+          test -s artifacts/ui/julgate-login.png
+
+      - name: Upload UI smoke screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: julgate-ui-smoke
+          path: artifacts/ui/julgate-login.png
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Compute version
         id: version
