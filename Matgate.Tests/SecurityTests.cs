@@ -2,6 +2,10 @@ using System.Security.Cryptography;
 using Matgate.Models;
 using Matgate.Services;
 using Matgate.Web;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Matgate.Tests;
@@ -30,6 +34,72 @@ public sealed class SecurityTests
         var protectedValue = first.Protect("server-password");
 
         Assert.Throws<InvalidOperationException>(() => second.Unprotect(protectedValue));
+    }
+
+    [Fact]
+    public async Task LegacyJsonCredentials_AreMigratedWithoutPlaintextBackups()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"julgate-security-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(root, "users.json"),
+                """
+                [{
+                  "userName": "legacy-admin",
+                  "guacamolePassword": "legacy-guac-secret",
+                  "isAdmin": true,
+                  "isEnabled": true
+                }]
+                """);
+            await File.WriteAllTextAsync(
+                Path.Combine(root, "servers.json"),
+                """
+                [{
+                  "name": "Legacy RDP",
+                  "protocol": 0,
+                  "host": "server.home",
+                  "password": "legacy-server-secret",
+                  "isEnabled": true
+                }]
+                """);
+
+            var configuration = new ConfigurationManager();
+            configuration["Matgate:DataDirectory"] = root;
+            configuration["Matgate:WorkspaceRoot"] = Path.Combine(root, "workspaces");
+            var environment = new TestHostEnvironment(root);
+            using var protector = new CredentialProtector(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+            var store = new JsonDataStore(
+                configuration,
+                environment,
+                NullLogger<JsonDataStore>.Instance,
+                protector);
+
+            await store.EnsureStoredCredentialsProtectedAsync();
+
+            var usersRaw = await File.ReadAllTextAsync(Path.Combine(root, "users.json"));
+            var serversRaw = await File.ReadAllTextAsync(Path.Combine(root, "servers.json"));
+            var usersBackup = await File.ReadAllTextAsync(Path.Combine(root, "users.json.bak"));
+            var serversBackup = await File.ReadAllTextAsync(Path.Combine(root, "servers.json.bak"));
+
+            Assert.DoesNotContain("legacy-guac-secret", usersRaw, StringComparison.Ordinal);
+            Assert.DoesNotContain("legacy-server-secret", serversRaw, StringComparison.Ordinal);
+            Assert.DoesNotContain("legacy-guac-secret", usersBackup, StringComparison.Ordinal);
+            Assert.DoesNotContain("legacy-server-secret", serversBackup, StringComparison.Ordinal);
+            Assert.Contains("julgate-aesgcm:v1:", usersRaw, StringComparison.Ordinal);
+            Assert.Contains("julgate-aesgcm:v1:", serversRaw, StringComparison.Ordinal);
+
+            var users = await store.GetUsersAsync();
+            var servers = await store.GetServersAsync();
+            Assert.Equal("legacy-guac-secret", users.Single().GuacamolePassword);
+            Assert.Equal("legacy-server-secret", servers.Single().Password);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
@@ -118,5 +188,22 @@ public sealed class SecurityTests
         const string cookie = "Other.Cookie=value; path=/; samesite=lax";
 
         Assert.Equal(cookie, WorkspaceCookieHardeningMiddleware.Rewrite(cookie, isHttps: true));
+    }
+
+    private sealed class TestHostEnvironment : IHostEnvironment
+    {
+        public TestHostEnvironment(string contentRootPath)
+        {
+            ContentRootPath = contentRootPath;
+            ContentRootFileProvider = new PhysicalFileProvider(contentRootPath);
+        }
+
+        public string EnvironmentName { get; set; } = Environments.Production;
+
+        public string ApplicationName { get; set; } = "Matgate.Tests";
+
+        public string ContentRootPath { get; set; }
+
+        public IFileProvider ContentRootFileProvider { get; set; }
     }
 }
