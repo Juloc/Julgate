@@ -51,4 +51,22 @@ public sealed class SecurityTests
 
         Assert.False(endpoint.IgnoreCertificate);
     }
+
+    [Theory]
+    [InlineData("file:///etc/passwd")]
+    [InlineData("https://user:password@server.home/")]
+    [InlineData("http://169.254.169.254/latest/meta-data/")]
+    [InlineData("http://metadata.google.internal/")]
+    public void WebsiteProxy_RejectsUnsafeTargets(string target)
+    {
+        Assert.Equal("", ServerEndpoint.NormalizeWebsiteUrl(target));
+    }
+
+    [Fact]
+    public void WebsiteProxy_AllowsPrivateHomeNetworkTargets()
+    {
+        Assert.Equal(
+            "https://192.168.1.10/",
+            ServerEndpoint.NormalizeWebsiteUrl("https://192.168.1.10"));
+    }
 }
