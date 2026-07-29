@@ -55,6 +55,51 @@ jobs:
       - name: Test
         run: dotnet test Matgate.slnx --configuration Release --no-build --logger "console;verbosity=normal"
 
+      - name: Start hardened stack and smoke test
+        env:
+          JULGATE_ADMIN_PASSWORD: ci-only-password-with-16-characters
+          JULGATE_CREDENTIAL_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+          JULGATE_GUACAMOLE_JSON_SECRET_KEY: fedcba98765432100123456789abcdef
+          JULGATE_BIND_ADDRESS: 127.0.0.1
+          JULGATE_PORT: 8088
+          JULGATE_REQUIRE_SECURE_COOKIES: "false"
+          JULGATE_DNS_SERVER: 1.1.1.1
+          JULGATE_DNS_SEARCH: local
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker compose logs --no-color || true
+            docker compose down --volumes --remove-orphans || true
+          }
+          trap cleanup EXIT
+
+          docker compose up --detach --build
+
+          ready=false
+          for attempt in {1..45}; do
+            if curl --fail --silent --show-error http://127.0.0.1:8088/healthz >/tmp/julgate-health.json; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$ready" != "true" ]]; then
+            echo "Julgate did not become healthy."
+            exit 1
+          fi
+
+          curl --fail --silent --show-error --dump-header /tmp/julgate-headers.txt \
+            --output /tmp/julgate-login.html http://127.0.0.1:8088/login
+          grep --ignore-case --quiet '^X-Content-Type-Options: nosniff' /tmp/julgate-headers.txt
+          grep --quiet 'Julgate' /tmp/julgate-login.html
+
+          website_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8088/website/test)"
+          tools_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8088/tools)"
+          test "$website_status" = "404"
+          test "$tools_status" = "404"
+
       - name: Compute version
         id: version
         shell: bash
