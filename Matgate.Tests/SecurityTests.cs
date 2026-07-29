@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Matgate.Models;
 using Matgate.Services;
+using Matgate.Web;
 using Xunit;
 
 namespace Matgate.Tests;
@@ -68,5 +69,34 @@ public sealed class SecurityTests
         Assert.Equal(
             "https://192.168.1.10/",
             ServerEndpoint.NormalizeWebsiteUrl("https://192.168.1.10"));
+    }
+
+    [Theory]
+    [InlineData("../secret")]
+    [InlineData("folder/../../secret")]
+    [InlineData("folder%2f..%2fsecret")]
+    [InlineData("folder%252f..%252fsecret")]
+    [InlineData("folder\\..\\secret")]
+    public void PathGuard_RejectsTraversalVariants(string value)
+    {
+        Assert.True(PathTraversalGuardMiddleware.ContainsUnsafePath(value));
+    }
+
+    [Theory]
+    [InlineData("/")]
+    [InlineData("/folder/file.txt")]
+    [InlineData("folder-name")]
+    public void PathGuard_AllowsNormalPaths(string value)
+    {
+        Assert.False(PathTraversalGuardMiddleware.ContainsUnsafePath(value));
+    }
+
+    [Theory]
+    [InlineData("../file.txt")]
+    [InlineData("folder/file.txt")]
+    [InlineData("..\\file.txt")]
+    public void PathGuard_RejectsUnsafeUploadNames(string value)
+    {
+        Assert.True(PathTraversalGuardMiddleware.IsUnsafeLeafName(value));
     }
 }
