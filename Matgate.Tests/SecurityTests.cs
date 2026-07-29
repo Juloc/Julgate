@@ -1,6 +1,6 @@
+using System.Security.Cryptography;
 using Matgate.Models;
 using Matgate.Services;
-using Microsoft.AspNetCore.DataProtection;
 
 namespace Matgate.Tests;
 
@@ -9,15 +9,25 @@ public sealed class SecurityTests
     [Fact]
     public void CredentialProtector_RoundTripsAndDoesNotExposePlaintext()
     {
-        var provider = new EphemeralDataProtectionProvider();
-        var protector = new CredentialProtector(provider);
+        var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        using var protector = new CredentialProtector(key);
 
         var protectedValue = protector.Protect("server-password");
 
-        Assert.True(protectedValue.StartsWith("julgate-protected:v1:", StringComparison.Ordinal));
+        Assert.True(protectedValue.StartsWith("julgate-aesgcm:v1:", StringComparison.Ordinal));
         Assert.False(protectedValue.Contains("server-password", StringComparison.Ordinal));
         Assert.Equal("server-password", protector.Unprotect(protectedValue));
         Assert.Equal(protectedValue, protector.Protect(protectedValue));
+    }
+
+    [Fact]
+    public void CredentialProtector_RejectsWrongKey()
+    {
+        using var first = new CredentialProtector(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        using var second = new CredentialProtector(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        var protectedValue = first.Protect("server-password");
+
+        Assert.Throws<InvalidOperationException>(() => second.Unprotect(protectedValue));
     }
 
     [Fact]
