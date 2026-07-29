@@ -29,7 +29,12 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
                 return;
             }
 
-            using var reader = new StreamReader(buffer, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
+            using var reader = new StreamReader(
+                buffer,
+                Encoding.UTF8,
+                detectEncodingFromByteOrderMarks: true,
+                bufferSize: 4096,
+                leaveOpen: true);
             var html = await reader.ReadToEndAsync(context.RequestAborted);
             html = ApplyBranding(html);
 
@@ -40,7 +45,11 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
 
             var output = Encoding.UTF8.GetBytes(html);
             context.Response.ContentLength = output.Length;
-            await originalBody.WriteAsync(output, context.RequestAborted);
+
+            if (!HttpMethods.IsHead(context.Request.Method))
+            {
+                await originalBody.WriteAsync(output, context.RequestAborted);
+            }
         }
         finally
         {
@@ -84,8 +93,13 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
     private static string ApplyBranding(string html)
     {
         return html
-            .Replace("MATGATE", "JULGATE", StringComparison.Ordinal)
-            .Replace("Matgate", "Julgate", StringComparison.Ordinal)
-            .Replace("matgate", "julgate", StringComparison.Ordinal);
+            .Replace(">Matgate<", ">Julgate<", StringComparison.Ordinal)
+            .Replace(">MATGATE ", ">JULGATE ", StringComparison.Ordinal)
+            .Replace(" - Matgate</title>", " - Julgate</title>", StringComparison.Ordinal)
+            .Replace("content=\"Matgate\"", "content=\"Julgate\"", StringComparison.Ordinal)
+            .Replace("content=\"MATGATE\"", "content=\"JULGATE\"", StringComparison.Ordinal)
+            .Replace("Matgate bereitet die Sitzung vor.", "Julgate bereitet die Sitzung vor.", StringComparison.Ordinal)
+            .Replace("Back to Matgate", "Back to Julgate", StringComparison.Ordinal)
+            .Replace("Zurueck zu Matgate", "Zurueck zu Julgate", StringComparison.Ordinal);
     }
 }
