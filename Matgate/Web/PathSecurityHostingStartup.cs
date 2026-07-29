@@ -21,6 +21,7 @@ public sealed class PathSecurityHostingStartup : IHostingStartup
             return app =>
             {
                 app.UseMiddleware<PathTraversalGuardMiddleware>();
+                app.UseMiddleware<CrossOriginGuardMiddleware>();
                 app.UseMiddleware<WorkspaceCookieHardeningMiddleware>();
                 next(app);
             };
