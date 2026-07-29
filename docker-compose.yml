@@ -92,6 +92,7 @@ services:
       - ./data/guac-drives:/drive
     networks:
       - backend
+      - egress
     restart: unless-stopped
 
   guacamole:
