@@ -11,6 +11,8 @@ on:
 permissions:
   contents: read
   packages: write
+  attestations: write
+  id-token: write
 
 concurrency:
   group: julgate-${{ github.workflow }}-${{ github.ref }}
@@ -28,6 +30,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate Compose files
+        env:
+          JULGATE_ADMIN_PASSWORD: ci-only-password-with-16-characters
+          JULGATE_CREDENTIAL_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+          JULGATE_GUACAMOLE_JSON_SECRET_KEY: fedcba98765432100123456789abcdef
+        run: |
+          docker compose -f docker-compose.yml config >/dev/null
+          docker compose -f docker-compose-simple.yaml config >/dev/null
+          docker compose -f docker-compose-dockhand.yaml config >/dev/null
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -104,3 +116,5 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
