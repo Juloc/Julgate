@@ -101,6 +101,7 @@ builder.Services.AddDataProtection()
     .SetApplicationName("Julgate");
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton<PasswordHasher>();
+builder.Services.AddSingleton<CredentialProtector>();
 builder.Services.AddSingleton<JsonDataStore>();
 builder.Services.AddSingleton<GuacamoleConfigWriter>();
 builder.Services.AddSingleton<HtmlViews>();
@@ -188,6 +189,7 @@ var hasher = app.Services.GetRequiredService<PasswordHasher>();
 var store = app.Services.GetRequiredService<JsonDataStore>();
 await store.EnsureSeedAdminAsync(hasher, app.Logger, app.Lifetime.ApplicationStopping);
 await store.EnsureGuacamoleSecretsAsync(hasher, app.Lifetime.ApplicationStopping);
+await store.EnsureStoredCredentialsProtectedAsync(app.Lifetime.ApplicationStopping);
 await store.EnsureWorkspacePublicAccessDefaultsAsync(TimeSpan.FromHours(24), app.Lifetime.ApplicationStopping);
 await store.RemoveLegacyGatewayServersAsync(app.Lifetime.ApplicationStopping);
 await app.Services.GetRequiredService<GuacamoleConfigWriter>()
