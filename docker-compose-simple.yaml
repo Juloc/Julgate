@@ -1,20 +1,26 @@
-name: matgate-simple
+name: julgate-simple
 
 x-home-dns: &home-dns
   dns:
-    - ${MATGATE_DNS_SERVER:-10.10.0.1}
+    - ${JULGATE_DNS_SERVER:-10.10.0.1}
   dns_search:
-    - ${MATGATE_DNS_SEARCH:-Schmoldt.local}
+    - ${JULGATE_DNS_SEARCH:-Schmoldt.local}
+
+x-security: &default-security
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
 
 services:
-  caddy:
-    <<: *home-dns
+  edge:
+    <<: *default-security
     image: caddy:2
     depends_on:
-      - matgate
+      - julgate
       - guacamole
     ports:
-      - "8088:8088"
+      - "${JULGATE_BIND_ADDRESS:-127.0.0.1}:${JULGATE_PORT:-8088}:8088"
     entrypoint:
       - /bin/sh
       - -c
@@ -26,52 +32,87 @@ services:
           "    reverse_proxy guacamole:8080" \
           "  }" \
           "  handle {" \
-          "    reverse_proxy matgate:8080" \
+          "    reverse_proxy julgate:8080" \
           "  }" \
           "}" > /tmp/Caddyfile && \
         exec caddy run --config /tmp/Caddyfile --adapter caddyfile
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /config:rw,noexec,nosuid,size=16m
+      - /data:rw,noexec,nosuid,size=16m
+    networks:
+      - frontend
+      - backend
     restart: unless-stopped
 
-  matgate:
-    <<: *home-dns
-    image: ghcr.io/real-ttx/matgate:latest
+  julgate:
+    <<:
+      - *home-dns
+      - *default-security
+    image: ghcr.io/juloc/julgate:latest
     pull_policy: always
     environment:
       ASPNETCORE_URLS: http://+:8080
+      JULGATE_DATA_DIR: /data
       MATGATE_DATA_DIR: /data
-      MATGATE_ADMIN_USER: ${MATGATE_ADMIN_USER:-admin}
-      MATGATE_ADMIN_PASSWORD: ${MATGATE_ADMIN_PASSWORD:-change-me-now}
-      Guacamole__JsonSecretKey: ${MATGATE_GUACAMOLE_JSON_SECRET_KEY:-0123456789abcdeffedcba9876543210}
+      JULGATE_ADMIN_USER: ${JULGATE_ADMIN_USER:-admin}
+      JULGATE_ADMIN_PASSWORD: ${JULGATE_ADMIN_PASSWORD:?Set JULGATE_ADMIN_PASSWORD in .env}
+      JULGATE_GUACAMOLE_JSON_SECRET_KEY: ${JULGATE_GUACAMOLE_JSON_SECRET_KEY:?Set JULGATE_GUACAMOLE_JSON_SECRET_KEY in .env}
+      Guacamole__JsonSecretKey: ${JULGATE_GUACAMOLE_JSON_SECRET_KEY:?Set JULGATE_GUACAMOLE_JSON_SECRET_KEY in .env}
       Guacamole__PublicBasePath: /guacamole
       Guacamole__DirectLaunch: "true"
+      JULGATE_REQUIRE_SECURE_COOKIES: ${JULGATE_REQUIRE_SECURE_COOKIES:-false}
+      JULGATE_TRUST_FORWARD_HEADERS: "true"
+      JULGATE_MAX_REQUEST_BODY_BYTES: ${JULGATE_MAX_REQUEST_BODY_BYTES:-536870912}
     volumes:
       - type: volume
         source: data
         target: /data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    networks:
+      - backend
+      - egress
     restart: unless-stopped
 
   guacd:
-    <<: *home-dns
+    <<:
+      - *home-dns
+      - *default-security
     image: guacamole/guacd:1.6.0
+    networks:
+      - backend
     restart: unless-stopped
 
   guacamole:
-    <<: *home-dns
+    <<:
+      - *home-dns
+      - *default-security
     image: guacamole/guacamole:1.6.0
     depends_on:
       - guacd
-      - matgate
+      - julgate
     environment:
       GUACD_HOSTNAME: guacd
       GUACD_PORT: "4822"
       JSON_ENABLED: "true"
-      JSON_SECRET_KEY: ${MATGATE_GUACAMOLE_JSON_SECRET_KEY:-0123456789abcdeffedcba9876543210}
+      JSON_SECRET_KEY: ${JULGATE_GUACAMOLE_JSON_SECRET_KEY:?Set JULGATE_GUACAMOLE_JSON_SECRET_KEY in .env}
     volumes:
       - type: volume
         source: data
         target: /etc/guacamole
+    networks:
+      - backend
     restart: unless-stopped
 
 volumes:
   data:
-    name: data
+    name: julgate-data
+
+networks:
+  frontend:
+  backend:
+    internal: true
+  egress:
