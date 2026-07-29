@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using Matgate.Models;
 using Matgate.Services;
 using Matgate.Web;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -171,6 +172,33 @@ public sealed class SecurityTests
     }
 
     [Fact]
+    public void CrossOriginGuard_RejectsCrossSiteBrowserRequest()
+    {
+        var context = CreateRequestContext();
+        context.Request.Headers["Sec-Fetch-Site"] = "cross-site";
+
+        Assert.False(CrossOriginGuardMiddleware.IsAllowed(context.Request, forceHttps: true));
+    }
+
+    [Fact]
+    public void CrossOriginGuard_AllowsMatchingHttpsOrigin()
+    {
+        var context = CreateRequestContext();
+        context.Request.Headers.Origin = "https://julgate.example";
+
+        Assert.True(CrossOriginGuardMiddleware.IsAllowed(context.Request, forceHttps: true));
+    }
+
+    [Fact]
+    public void CrossOriginGuard_RejectsDowngradedOriginWhenHttpsIsRequired()
+    {
+        var context = CreateRequestContext();
+        context.Request.Headers.Origin = "http://julgate.example";
+
+        Assert.False(CrossOriginGuardMiddleware.IsAllowed(context.Request, forceHttps: true));
+    }
+
+    [Fact]
     public void WorkspaceCookie_IsStrictHttpOnlyAndSecureOnHttps()
     {
         var rewritten = WorkspaceCookieHardeningMiddleware.Rewrite(
@@ -188,6 +216,15 @@ public sealed class SecurityTests
         const string cookie = "Other.Cookie=value; path=/; samesite=lax";
 
         Assert.Equal(cookie, WorkspaceCookieHardeningMiddleware.Rewrite(cookie, isHttps: true));
+    }
+
+    private static DefaultHttpContext CreateRequestContext()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Scheme = Uri.UriSchemeHttps;
+        context.Request.Host = new HostString("julgate.example");
+        return context;
     }
 
     private sealed class TestHostEnvironment : IHostEnvironment
