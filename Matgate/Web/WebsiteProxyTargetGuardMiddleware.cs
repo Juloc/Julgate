@@ -72,7 +72,7 @@ public sealed class WebsiteProxyTargetGuardMiddleware
             return false;
         }
 
-        if (_allowedHosts.Count > 0 && !_allowedHosts.Contains(target.Host))
+        if (_allowedHosts.Count == 0 || !_allowedHosts.Contains(target.Host))
         {
             return false;
         }
@@ -97,6 +97,8 @@ public sealed class WebsiteProxyTargetGuardMiddleware
             || address.Equals(IPAddress.IPv6Any)
             || address.Equals(IPAddress.None)
             || address.Equals(IPAddress.IPv6None)
+            || address.IsIPv6LinkLocal
+            || address.IsIPv6SiteLocal
             || address.IsIPv6Multicast)
         {
             return true;
@@ -109,7 +111,9 @@ public sealed class WebsiteProxyTargetGuardMiddleware
         if (isIpv4Mapped)
         {
             var ipv4 = bytes.AsSpan(12, 4);
-            if (ipv4[0] == 169 && ipv4[1] == 254)
+            if (ipv4[0] == 0
+                || (ipv4[0] == 169 && ipv4[1] == 254)
+                || ipv4[0] >= 224)
             {
                 return true;
             }
