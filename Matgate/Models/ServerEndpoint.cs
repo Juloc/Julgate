@@ -52,7 +52,7 @@ public sealed class ServerEndpoint
 
     public int TerminalFontSize { get; set; } = DefaultTerminalFontSize;
 
-    public bool IgnoreCertificate { get; set; } = true;
+    public bool IgnoreCertificate { get; set; }
 
     public bool IsEnabled { get; set; } = true;
 
