@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Matgate.Models;
 using Matgate.Services;
+using Xunit;
 
 namespace Matgate.Tests;
 
