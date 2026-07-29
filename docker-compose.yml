@@ -39,6 +39,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
+      - /config:rw,noexec,nosuid,size=16m
+      - /data:rw,noexec,nosuid,size=16m
     networks:
       - frontend
       - backend
@@ -65,7 +67,10 @@ services:
       Guacamole__DirectLaunch: "true"
       JULGATE_REQUIRE_SECURE_COOKIES: ${JULGATE_REQUIRE_SECURE_COOKIES:-false}
       JULGATE_TRUST_FORWARD_HEADERS: "true"
+      JULGATE_SESSION_HOURS: ${JULGATE_SESSION_HOURS:-8}
       JULGATE_MAX_REQUEST_BODY_BYTES: ${JULGATE_MAX_REQUEST_BODY_BYTES:-536870912}
+      JULGATE_ENABLE_WEBSITE_PROXY: ${JULGATE_ENABLE_WEBSITE_PROXY:-false}
+      JULGATE_ENABLE_NETWORK_TOOLS: ${JULGATE_ENABLE_NETWORK_TOOLS:-false}
     volumes:
       - ./data:/data
     extra_hosts:
