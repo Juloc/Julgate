@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Matgate.Web;
 using Microsoft.AspNetCore.Http;
 using Xunit;
@@ -23,5 +24,26 @@ public sealed class NetworkToolsAdminGuardTests
     public void OtherRoutes_DoNotUseNetworkToolsGuard(string path)
     {
         Assert.False(NetworkToolsAdminGuardMiddleware.RequiresAdministrator(new PathString(path)));
+    }
+
+    [Theory]
+    [InlineData("admin")]
+    [InlineData("Admin")]
+    [InlineData("ADMIN")]
+    public void AdministratorRole_IsMatchedCaseInsensitively(string role)
+    {
+        var principal = new ClaimsPrincipal(
+            new ClaimsIdentity([new Claim(ClaimTypes.Role, role)], "test"));
+
+        Assert.True(NetworkToolsAdminGuardMiddleware.IsAdministrator(principal));
+    }
+
+    [Fact]
+    public void NonAdministratorRole_IsRejected()
+    {
+        var principal = new ClaimsPrincipal(
+            new ClaimsIdentity([new Claim(ClaimTypes.Role, "user")], "test"));
+
+        Assert.False(NetworkToolsAdminGuardMiddleware.IsAdministrator(principal));
     }
 }
