@@ -56,7 +56,10 @@ services:
       Guacamole__DirectLaunch: "true"
       JULGATE_REQUIRE_SECURE_COOKIES: ${JULGATE_REQUIRE_SECURE_COOKIES:-true}
       JULGATE_TRUST_FORWARD_HEADERS: "true"
+      JULGATE_SESSION_HOURS: ${JULGATE_SESSION_HOURS:-8}
       JULGATE_MAX_REQUEST_BODY_BYTES: ${JULGATE_MAX_REQUEST_BODY_BYTES:-536870912}
+      JULGATE_ENABLE_WEBSITE_PROXY: ${JULGATE_ENABLE_WEBSITE_PROXY:-false}
+      JULGATE_ENABLE_NETWORK_TOOLS: ${JULGATE_ENABLE_NETWORK_TOOLS:-false}
       JULGATE_DNS_SERVER: ${JULGATE_DNS_SERVER:-10.10.0.1}
       JULGATE_DNS_SEARCH: ${JULGATE_DNS_SEARCH:-Schmoldt.local}
     dns:
@@ -78,8 +81,13 @@ services:
   guacd:
     <<: *default-security
     image: guacamole/guacd:1.6.0
+    dns:
+      - ${JULGATE_DNS_SERVER:-10.10.0.1}
+    dns_search:
+      - ${JULGATE_DNS_SEARCH:-Schmoldt.local}
     networks:
       - backend
+      - egress
     restart: unless-stopped
 
   guacamole:
