@@ -412,15 +412,10 @@ public sealed class JsonDataStore
         }
 
         SetPrivateFilePermissions(tempPath);
-
-        if (File.Exists(path))
-        {
-            File.Copy(path, backupPath, overwrite: true);
-            SetPrivateFilePermissions(backupPath);
-        }
-
         File.Move(tempPath, path, overwrite: true);
         SetPrivateFilePermissions(path);
+        File.Copy(path, backupPath, overwrite: true);
+        SetPrivateFilePermissions(backupPath);
     }
 
     private static string? FirstEnvironmentValue(params string[] names)
