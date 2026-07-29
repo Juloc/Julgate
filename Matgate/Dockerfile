@@ -24,17 +24,15 @@ ARG MATGATE_BUILD_TIME=
 ENV ASPNETCORE_URLS=http://+:8080
 ENV JULGATE_DATA_DIR=/data
 ENV MATGATE_DATA_DIR=/data
-ENV JULGATE_GUACAMOLE_CONFIG_DIR=/guacamole-config
 ENV JULGATE_BUILD_TAG=${JULGATE_BUILD_TAG}
 ENV MATGATE_BUILD_TAG=${MATGATE_BUILD_TAG}
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /data /guacamole-config \
-    && chown -R "$APP_UID":0 /data /guacamole-config /app \
-    && chmod 0700 /data \
-    && chmod 0770 /guacamole-config
+    && mkdir -p /data \
+    && chown -R "$APP_UID":0 /data /app \
+    && chmod 0700 /data
 
 EXPOSE 8080
 
