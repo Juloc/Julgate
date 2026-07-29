@@ -92,8 +92,12 @@ jobs:
 
           curl --fail --silent --show-error --dump-header /tmp/julgate-headers.txt \
             --output /tmp/julgate-login.html http://127.0.0.1:8088/login
+          curl --fail --silent --show-error --output /tmp/guacamole.html \
+            http://127.0.0.1:8088/guacamole/
           grep --ignore-case --quiet '^X-Content-Type-Options: nosniff' /tmp/julgate-headers.txt
           grep --quiet 'Julgate' /tmp/julgate-login.html
+          docker compose exec -T julgate sh -c \
+            'test ! -e /data/user-mapping.xml && test ! -e /data/guacamole/user-mapping.xml'
 
           website_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8088/website/test)"
           tools_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8088/tools)"
