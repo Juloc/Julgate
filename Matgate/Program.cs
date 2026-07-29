@@ -23,6 +23,7 @@ var sessionHours = Math.Clamp(ReadPositiveInt("JULGATE_SESSION_HOURS", 8), 1, 24
 var requireSecureCookies = ReadBoolean("JULGATE_REQUIRE_SECURE_COOKIES", !builder.Environment.IsDevelopment());
 var trustForwardedHeaders = ReadBoolean("JULGATE_TRUST_FORWARD_HEADERS", true);
 var enableWebsiteProxy = ReadBoolean("JULGATE_ENABLE_WEBSITE_PROXY", false);
+var enableNetworkTools = ReadBoolean("JULGATE_ENABLE_NETWORK_TOOLS", false);
 
 Directory.CreateDirectory(keyDirectory);
 SetPrivateDirectoryPermissions(dataDirectory);
@@ -116,9 +117,14 @@ if (trustForwardedHeaders)
     app.UseForwardedHeaders();
 }
 
+app.UseStaticFiles();
+app.UseMiddleware<Ae01ThemeMiddleware>();
+
 app.Use(async (context, next) =>
 {
     var isWebsitePath = context.Request.Path.StartsWithSegments("/website");
+    var isNetworkToolsPath = context.Request.Path.StartsWithSegments("/tools")
+        || context.Request.Path.StartsWithSegments("/api/tools");
     var isGatewayContent = context.Request.Path.StartsWithSegments("/guacamole") || isWebsitePath;
 
     if (isWebsitePath && !enableWebsiteProxy)
@@ -128,11 +134,16 @@ app.Use(async (context, next) =>
         return;
     }
 
+    if (isNetworkToolsPath && !enableNetworkTools)
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        await context.Response.WriteAsync("Network tools are disabled.");
+        return;
+    }
+
     context.Response.OnStarting(() =>
     {
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
-        context.Response.Headers["Referrer-Policy"] = "same-origin";
-        context.Response.Headers["Permissions-Policy"] = "camera=(), geolocation=(), microphone=(), payment=(), usb=()";
 
         if (context.Request.IsHttps)
         {
@@ -141,6 +152,8 @@ app.Use(async (context, next) =>
 
         if (!isGatewayContent)
         {
+            context.Response.Headers["Referrer-Policy"] = "same-origin";
+            context.Response.Headers["Permissions-Policy"] = "camera=(), geolocation=(), microphone=(), payment=(), usb=()";
             context.Response.Headers["X-Frame-Options"] = "DENY";
             context.Response.Headers["Content-Security-Policy"] =
                 "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; " +
