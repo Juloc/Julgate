@@ -1,4 +1,4 @@
-name: Docker image
+name: Julgate build
 
 on:
   push:
@@ -12,18 +12,33 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: julgate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
-    name: Build Matgate image
+    name: Build Julgate
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore Matgate.slnx
+
+      - name: Build
+        run: dotnet build Matgate.slnx --configuration Release --no-restore
 
       - name: Compute version
         id: version
@@ -78,9 +93,9 @@ jobs:
           context: .
           file: Matgate/Dockerfile
           build-args: |
-            MATGATE_VERSION=${{ steps.version.outputs.version }}
-            MATGATE_BUILD_TAG=github
-            MATGATE_BUILD_TIME=${{ steps.version.outputs.build_time }}
+            JULGATE_VERSION=${{ steps.version.outputs.version }}
+            JULGATE_BUILD_TAG=github
+            JULGATE_BUILD_TIME=${{ steps.version.outputs.build_time }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
