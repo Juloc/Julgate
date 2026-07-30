@@ -108,7 +108,8 @@ builder.Services.AddSingleton<GuacamoleConfigWriter>();
 builder.Services.AddSingleton<HtmlViews>();
 builder.Services.AddSingleton<GuacamoleLauncher>();
 builder.Services.AddSingleton<NetworkToolsService>();
-builder.Services.AddSingleton<IFileGatewayService, FileGatewayService>();
+builder.Services.AddSingleton<FileGatewayService>();
+builder.Services.AddSingleton<IFileGatewayService, FileGatewaySecurityDecorator>();
 builder.Services.AddSingleton<WorkspaceService>();
 builder.Services.AddSingleton<WebsiteProxyService>();
 
@@ -323,4 +324,8 @@ static void SetPrivateDirectoryPermissions(string path)
     catch (UnauthorizedAccessException)
     {
     }
+}
+
+public partial class Program
+{
 }
