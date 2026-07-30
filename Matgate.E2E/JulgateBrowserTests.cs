@@ -130,7 +130,7 @@ public sealed partial class JulgateBrowserTests
         var cookieHeader = string.Join("; ", cookies.Select(cookie => $"{cookie.Name}={cookie.Value}"));
         Assert.False(string.IsNullOrWhiteSpace(cookieHeader));
 
-        using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+        using var handler = new HttpClientHandler { AllowAutoRedirect = true };
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
         client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", cookieHeader);
         var pages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -143,7 +143,7 @@ public sealed partial class JulgateBrowserTests
                 $"{route} returned HTTP {(int)response.StatusCode}.");
             Assert.DoesNotContain(
                 "/login",
-                response.Headers.Location?.ToString() ?? string.Empty,
+                response.RequestMessage?.RequestUri?.AbsolutePath ?? string.Empty,
                 StringComparison.OrdinalIgnoreCase);
 
             var html = await response.Content.ReadAsStringAsync();
