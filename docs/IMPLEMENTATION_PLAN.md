@@ -1,58 +1,83 @@
-# Julgate implementation plan
+# Julgate implementation status
 
-Julgate keeps the existing .NET 10, Minimal API and JSON-file architecture. This plan does not introduce PostgreSQL, EF Core, ASP.NET Core Identity or Razor Pages.
+Julgate keeps the existing .NET 10, Minimal API and JSON-file architecture. PostgreSQL, EF Core, ASP.NET Core Identity and Razor Pages are not part of this implementation.
 
-## A. Foundation and branding
+Release target: **0.7.0**.
 
-- Rename product-facing Matgate references to Julgate.
-- Keep compatibility aliases for existing environment variables during migration.
-- Document current capabilities, data paths and backup requirements.
-- Preserve RDP, VNC, SSH, file access, workspaces and PWA behavior.
+## A. Foundation and branding — complete
 
-## B. Critical security
+- Product-facing text, PWA metadata and browser surfaces use Julgate.
+- Legacy environment-variable aliases remain available for migration compatibility.
+- Legacy preference cookies and browser storage are migrated to Julgate names.
+- RDP, VNC, SSH, file access, workspaces and PWA behavior remain supported.
+- Internal project, assembly and namespace names remain `Matgate` as a deliberate compatibility boundary. They are not exposed product branding and are not scheduled for a risky all-at-once rename.
 
-- Reject default administrator credentials and fixed Guacamole secrets.
-- Protect saved connection and bridge credentials at rest.
-- Use secure, short-lived authentication cookies.
-- Add login and request rate limits.
-- Enforce request-size and timeout limits.
-- Add origin checks and browser security headers.
-- Verify target certificates by default.
-- Store JSON data and Data Protection keys with private filesystem permissions.
-- Record security-relevant administration and connection events.
+## B. Critical security — complete
 
-## C. Gateway hardening
+- Default administrator passwords and fixed Guacamole keys are rejected.
+- Stored target and bridge credentials use AES-GCM.
+- Primary and previous credential keys support controlled rotation.
+- Authentication cookies are short-lived, secure-configurable, HttpOnly and SameSite.
+- Login and global request rate limits are active.
+- Content-Length and streaming request bodies are bounded.
+- Origin, traversal, CSRF and browser-header guards are active.
+- Target certificates are verified by default.
+- JSON, backup, key and audit files use private permissions.
+- Authenticated administration and session access are audited without request bodies or credentials.
 
-- Keep Guacamole and guacd on an internal Docker network.
-- Publish only the edge service.
-- Make the website proxy and network tools opt-in.
-- Add explicit destination restrictions and SSRF protection to the website proxy.
-- Protect file operations against traversal, symlink escape and oversized archives.
-- Apply protocol-specific timeouts and limits.
+## C. Gateway hardening — complete
 
-## D. AE01 interface
+- Guacamole and `guacd` remain on the internal backend network.
+- Only the edge service is published.
+- Website proxy, network tools and archive extraction are opt-in.
+- Website proxy targets require literal permitted IP addresses; DNS rebinding is eliminated.
+- File paths are validated at both HTTP and service boundaries.
+- SFTP/FTP symbolic links, SMB reparse points and local symbolic-link uploads are rejected.
+- Upload, download, directory-entry and operation-time limits are enforced.
+- Archive expanded bytes, entries, concurrency and tmpfs are bounded.
+- Network tools require an administrator account when enabled.
 
-- Apply a Fluent 2 / Windows 11 visual system.
-- Use neutral surfaces, clear borders, compact spacing and visible controls.
-- Keep connection tabs, server navigation and status information dense but readable.
-- Use consistent design tokens for light, dark and system themes.
-- Improve desktop, tablet, mobile and installed-PWA layouts.
-- Replace remaining Matgate product text and storage keys with Julgate equivalents.
+## D. AE01 interface — complete
 
-## E. Tests and CI
+- Fluent/Windows-style design tokens, neutral surfaces, visible borders and compact controls are applied.
+- Light, dark, system and reduced-motion modes are supported.
+- Desktop, tablet, phone and installed-PWA layouts are covered by Playwright.
+- Primary administration, account, workspace, session and about pages are checked for horizontal overflow and HTTP errors.
+- Product text, manifest metadata, preference cookies and browser storage use Julgate names.
 
-- Add unit tests for authentication, password hashing and credential protection.
-- Add authorization-matrix tests for administrative and user routes.
-- Add regression tests for origin checks, SSRF, path traversal and upload limits.
-- Add Playwright smoke tests for login, administration and session launch.
-- Build the application and container on every pull request.
-- Add CodeQL, dependency review, container scanning and an SBOM.
+## E. Tests and CI — complete
 
-## F. Deployment and release
+- Credential protection, hashing, key rotation and migration tests.
+- Full server-access and editing authorization matrix.
+- RDP, VNC and SSH encrypted-launch tests.
+- Origin, SSRF, traversal, upload, request and archive-limit regression tests.
+- Playwright login, protected-route, branding, storage-migration and responsive-page tests.
+- Real SFTP, FTP and SMB upload/list/download/delete roundtrips.
+- Hardened Compose startup and HTTP security smoke tests.
+- Real legacy plaintext JSON migration in a container.
+- CodeQL and direct/transitive NuGet vulnerability audit.
+- Trivy image and configuration scans.
+- SBOM and provenance generation.
+- Real Docker-volume backup and restore drill.
 
-- Publish `ghcr.io/juloc/julgate` with immutable version and commit tags.
-- Run Julgate as a non-root user with a read-only root filesystem.
-- Drop Linux capabilities and enable `no-new-privileges`.
-- Provide local, reverse-proxy and Dockhand Compose variants.
-- Document backup, restore, key rotation and recovery.
-- Validate a staging deployment before the first stable Julgate release.
+## F. Deployment and release — complete
+
+- `ghcr.io/juloc/julgate` publishes immutable version and commit tags.
+- Julgate runs non-root with a read-only root filesystem.
+- Linux capabilities are dropped and `no-new-privileges` is enabled.
+- Local, published-image and Dockhand Compose variants are aligned.
+- Docker secret and previous-key rotation overlays are provided.
+- Backup, restore, rollback, key rotation, staging acceptance and incident collection are documented.
+- Ephemeral staging, protocol integration and recovery validation run automatically before merge.
+
+## Release gate
+
+Version 0.7.0 may be merged only when every current PR workflow is successful:
+
+- Julgate build
+- Julgate security
+- Julgate completion validation
+- Julgate file protocol integration
+- Julgate operations validation
+
+After merge, the main image must be published and pulled successfully by the deployment-repository smoke test before the Docker stack is merged.
