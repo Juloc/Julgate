@@ -37,9 +37,13 @@ public sealed class JulgateBrowserTests : IAsyncLifetime
         await using var context = await _browser.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_baseUrl}/admin", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        var response = await page.GotoAsync(
+            $"{_baseUrl}/admin/users",
+            new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
 
+        Assert.NotNull(response);
         Assert.Contains("/login", page.Url, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("returnUrl", page.Url, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -147,15 +151,20 @@ public sealed class JulgateBrowserTests : IAsyncLifetime
         await page.GotoAsync($"{_baseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
         await page.FillAsync("input[name=username]", _adminUser);
         await page.FillAsync("input[name=password]", _adminPassword);
-        await page.ClickAsync("button[type=submit]");
-        await page.WaitForURLAsync($"{_baseUrl}/");
+        var response = await page.RunAndWaitForResponseAsync(
+            async () => await page.ClickAsync("button[type=submit]"),
+            response => response.Request.Method == "POST" && response.Url.EndsWith("/login", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEqual(429, response.Status);
+        await page.WaitForURLAsync(url => !url.Contains("/login", StringComparison.OrdinalIgnoreCase));
         await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
     }
 
     private static async Task AssertPageIsResponsiveAsync(IPage page)
     {
+        await page.WaitForFunctionAsync("() => !document.body.innerText.includes('MATGATE')");
         var bodyText = await page.Locator("body").InnerTextAsync();
         Assert.Contains("Julgate", bodyText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("MATGATE", bodyText, StringComparison.Ordinal);
         Assert.True(await page.EvaluateAsync<bool>(
             "() => document.documentElement.scrollWidth <= window.innerWidth + 1"));
     }
