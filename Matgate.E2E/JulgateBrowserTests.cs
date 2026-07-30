@@ -101,11 +101,16 @@ public sealed class JulgateBrowserTests
         await page.FillAsync("input[name=username]", _adminUser);
         await page.FillAsync("input[name=password]", _adminPassword);
         var response = await page.RunAndWaitForResponseAsync(
-            async () => await page.ClickAsync("button[type=submit]"),
+            async () => await page.ClickAsync(
+                "button[type=submit]",
+                new PageClickOptions { NoWaitAfter = true }),
             candidate => candidate.Request.Method == "POST"
                 && candidate.Url.EndsWith("/login", StringComparison.OrdinalIgnoreCase));
         Assert.NotEqual(429, response.Status);
-        await page.WaitForURLAsync(url => !url.Contains("/login", StringComparison.OrdinalIgnoreCase));
+        Assert.True(response.Status is >= 200 and < 400);
+
+        var cookies = await page.Context.CookiesAsync(_baseUrl);
+        Assert.Contains(cookies, cookie => cookie.HttpOnly && !string.IsNullOrWhiteSpace(cookie.Value));
     }
 
     private async Task VerifyAuthenticatedRoutesAsync(IBrowserContext context)
