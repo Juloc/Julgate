@@ -1,0 +1,123 @@
+name: Julgate completion validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: julgate-completion-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-e2e:
+    name: Playwright responsive and auth E2E
+    runs-on: ubuntu-24.04
+    env:
+      JULGATE_ADMIN_USER: admin
+      JULGATE_ADMIN_PASSWORD: ci-only-password-with-16-characters
+      JULGATE_GUACAMOLE_JSON_SECRET_KEY: fedcba98765432100123456789abcdef
+      JULGATE_BIND_ADDRESS: 127.0.0.1
+      JULGATE_PORT: 8088
+      JULGATE_REQUIRE_SECURE_COOKIES: "false"
+      JULGATE_DNS_SERVER: 1.1.1.1
+      JULGATE_DNS_SEARCH: local
+      JULGATE_BASE_URL: http://127.0.0.1:8088
+      JULGATE_E2E_ARTIFACTS: artifacts/e2e
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: latest
+          dotnet-channel: "10.0"
+
+      - name: Create ephemeral Docker secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p secrets
+          printf '%s' "$JULGATE_ADMIN_PASSWORD" > secrets/julgate_admin_password
+          printf '%s' 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' > secrets/julgate_credential_key
+
+      - name: Start hardened staging stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml -f docker-compose-secrets.yaml up --detach --build
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8088/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f docker-compose.yml -f docker-compose-secrets.yaml logs --no-color
+          exit 1
+
+      - name: Build E2E tests
+        run: dotnet build Matgate.E2E/Matgate.E2E.csproj --configuration Release
+
+      - name: Install Playwright Chromium
+        shell: pwsh
+        run: ./Matgate.E2E/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: dotnet test Matgate.E2E/Matgate.E2E.csproj --configuration Release --no-build --logger "console;verbosity=normal"
+
+      - name: Upload responsive screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: julgate-responsive-e2e
+          path: artifacts/e2e
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Show stack logs
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose-secrets.yaml logs --no-color
+
+      - name: Stop staging stack
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose-secrets.yaml down --volumes --remove-orphans || true
+          rm -rf secrets
+
+  container-security:
+    name: Trivy image and configuration scan
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build scan image
+        run: docker build --file Matgate/Dockerfile --tag julgate-completion:${{ github.sha }} .
+
+      - name: Scan image vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: julgate-completion:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
+      - name: Scan Docker and workflow configuration
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
