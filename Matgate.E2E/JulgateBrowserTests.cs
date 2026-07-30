@@ -7,6 +7,7 @@ public sealed class JulgateBrowserTests : IAsyncLifetime
 {
     private IPlaywright _playwright = null!;
     private IBrowser _browser = null!;
+    private string _storageStatePath = null!;
     private readonly string _baseUrl = Environment.GetEnvironmentVariable("JULGATE_BASE_URL")
         ?? "http://127.0.0.1:8088";
     private readonly string _adminUser = Environment.GetEnvironmentVariable("JULGATE_ADMIN_USER") ?? "admin";
@@ -18,10 +19,27 @@ public sealed class JulgateBrowserTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         Directory.CreateDirectory(_artifactDirectory);
+        _storageStatePath = Path.Combine(_artifactDirectory, "admin-storage-state.json");
         _playwright = await Playwright.CreateAsync();
         _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {
             Headless = true
+        });
+
+        await using var context = await _browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{_baseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.FillAsync("input[name=username]", _adminUser);
+        await page.FillAsync("input[name=password]", _adminPassword);
+        var response = await page.RunAndWaitForResponseAsync(
+            async () => await page.ClickAsync("button[type=submit]"),
+            candidate => candidate.Request.Method == "POST"
+                && candidate.Url.EndsWith("/login", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEqual(429, response.Status);
+        await page.WaitForURLAsync(url => !url.Contains("/login", StringComparison.OrdinalIgnoreCase));
+        await context.StorageStateAsync(new BrowserContextStorageStateOptions
+        {
+            Path = _storageStatePath
         });
     }
 
@@ -29,6 +47,10 @@ public sealed class JulgateBrowserTests : IAsyncLifetime
     {
         await _browser.DisposeAsync();
         _playwright.Dispose();
+        if (File.Exists(_storageStatePath))
+        {
+            File.Delete(_storageStatePath);
+        }
     }
 
     [Fact]
@@ -92,9 +114,9 @@ public sealed class JulgateBrowserTests : IAsyncLifetime
     [InlineData("phone", 390, 844)]
     public async Task AuthenticatedShellWorksWithoutHorizontalOverflow(string name, int width, int height)
     {
-        await using var context = await NewContextAsync(width, height);
+        await using var context = await NewAuthenticatedContextAsync(width, height);
         var page = await context.NewPageAsync();
-        await LoginAsync(page);
+        await page.GotoAsync(_baseUrl, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
 
         await AssertPageIsResponsiveAsync(page);
         Assert.True(await page.Locator("nav, [role=navigation]").CountAsync() > 0);
@@ -123,10 +145,8 @@ public sealed class JulgateBrowserTests : IAsyncLifetime
     [InlineData("/about", 390, 844)]
     public async Task PrimaryPagesRenderOnDesktopAndPhone(string route, int width, int height)
     {
-        await using var context = await NewContextAsync(width, height);
+        await using var context = await NewAuthenticatedContextAsync(width, height);
         var page = await context.NewPageAsync();
-        await LoginAsync(page);
-
         var response = await page.GotoAsync($"{_baseUrl}{route}", new PageGotoOptions
         {
             WaitUntil = WaitUntilState.NetworkIdle
@@ -134,29 +154,18 @@ public sealed class JulgateBrowserTests : IAsyncLifetime
 
         Assert.NotNull(response);
         Assert.True(response!.Status < 400, $"{route} returned HTTP {response.Status}.");
+        Assert.DoesNotContain("/login", page.Url, StringComparison.OrdinalIgnoreCase);
         await AssertPageIsResponsiveAsync(page);
     }
 
-    private Task<IBrowserContext> NewContextAsync(int width, int height)
+    private Task<IBrowserContext> NewAuthenticatedContextAsync(int width, int height)
     {
         return _browser.NewContextAsync(new BrowserNewContextOptions
         {
             ViewportSize = new ViewportSize { Width = width, Height = height },
-            IgnoreHTTPSErrors = true
+            IgnoreHTTPSErrors = true,
+            StorageStatePath = _storageStatePath
         });
-    }
-
-    private async Task LoginAsync(IPage page)
-    {
-        await page.GotoAsync($"{_baseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
-        await page.FillAsync("input[name=username]", _adminUser);
-        await page.FillAsync("input[name=password]", _adminPassword);
-        var response = await page.RunAndWaitForResponseAsync(
-            async () => await page.ClickAsync("button[type=submit]"),
-            response => response.Request.Method == "POST" && response.Url.EndsWith("/login", StringComparison.OrdinalIgnoreCase));
-        Assert.NotEqual(429, response.Status);
-        await page.WaitForURLAsync(url => !url.Contains("/login", StringComparison.OrdinalIgnoreCase));
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
     }
 
     private static async Task AssertPageIsResponsiveAsync(IPage page)
