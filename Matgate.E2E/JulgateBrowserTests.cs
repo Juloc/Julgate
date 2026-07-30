@@ -22,33 +22,31 @@ public sealed class JulgateBrowserTests
         {
             Headless = true
         });
-
-        await VerifyAnonymousRoutesAsync(browser);
-        await VerifyLegacyStorageMigrationAsync(browser);
-
-        var storageStatePath = Path.Combine(_artifactDirectory, "admin-storage-state.json");
-        try
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
         {
-            await CreateAuthenticatedStateAsync(browser, storageStatePath);
-            await VerifyResponsiveShellAsync(browser, storageStatePath);
-            await VerifyPrimaryPagesAsync(browser, storageStatePath);
-        }
-        finally
-        {
-            if (File.Exists(storageStatePath))
-            {
-                File.Delete(storageStatePath);
-            }
-        }
-    }
-
-    private async Task VerifyAnonymousRoutesAsync(IBrowser browser)
-    {
-        await using var context = await browser.NewContextAsync();
-        context.SetDefaultTimeout(10_000);
-        context.SetDefaultNavigationTimeout(20_000);
+            ViewportSize = new ViewportSize { Width = 1440, Height = 1000 },
+            IgnoreHTTPSErrors = true
+        });
+        context.SetDefaultTimeout(5_000);
+        context.SetDefaultNavigationTimeout(10_000);
         var page = await context.NewPageAsync();
 
+        Console.WriteLine("Checking anonymous protection and branding.");
+        await VerifyAnonymousRoutesAsync(page);
+        await VerifyLegacyStorageMigrationAsync(page);
+
+        Console.WriteLine("Signing in once for all authenticated checks.");
+        await LoginAsync(page);
+
+        Console.WriteLine("Checking responsive shell screenshots.");
+        await VerifyResponsiveShellAsync(page);
+
+        Console.WriteLine("Checking primary authenticated routes.");
+        await VerifyPrimaryPagesAsync(page);
+    }
+
+    private async Task VerifyAnonymousRoutesAsync(IPage page)
+    {
         var protectedResponse = await page.GotoAsync(
             $"{_baseUrl}/admin/users",
             new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
@@ -73,12 +71,8 @@ public sealed class JulgateBrowserTests
         Assert.DoesNotContain(">Matgate<", loginHtml, StringComparison.Ordinal);
     }
 
-    private async Task VerifyLegacyStorageMigrationAsync(IBrowser browser)
+    private async Task VerifyLegacyStorageMigrationAsync(IPage page)
     {
-        await using var context = await browser.NewContextAsync();
-        context.SetDefaultTimeout(10_000);
-        context.SetDefaultNavigationTimeout(20_000);
-        var page = await context.NewPageAsync();
         await page.GotoAsync(
             $"{_baseUrl}/login",
             new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
@@ -88,7 +82,6 @@ public sealed class JulgateBrowserTests
               localStorage.setItem('matgate.workspace.panel.demo', 'files');
             }
             """);
-
         await page.ReloadAsync(new PageReloadOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
 
         Assert.Null(await page.EvaluateAsync<string?>("() => localStorage.getItem('matgate.shell.tabs.v1')"));
@@ -97,12 +90,8 @@ public sealed class JulgateBrowserTests
         Assert.Equal("files", await page.EvaluateAsync<string?>("() => localStorage.getItem('julgate.workspace.panel.demo')"));
     }
 
-    private async Task CreateAuthenticatedStateAsync(IBrowser browser, string storageStatePath)
+    private async Task LoginAsync(IPage page)
     {
-        await using var context = await browser.NewContextAsync();
-        context.SetDefaultTimeout(10_000);
-        context.SetDefaultNavigationTimeout(20_000);
-        var page = await context.NewPageAsync();
         await page.GotoAsync(
             $"{_baseUrl}/login",
             new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
@@ -114,13 +103,9 @@ public sealed class JulgateBrowserTests
                 && candidate.Url.EndsWith("/login", StringComparison.OrdinalIgnoreCase));
         Assert.NotEqual(429, response.Status);
         await page.WaitForURLAsync(url => !url.Contains("/login", StringComparison.OrdinalIgnoreCase));
-        await context.StorageStateAsync(new BrowserContextStorageStateOptions
-        {
-            Path = storageStatePath
-        });
     }
 
-    private async Task VerifyResponsiveShellAsync(IBrowser browser, string storageStatePath)
+    private async Task VerifyResponsiveShellAsync(IPage page)
     {
         var viewports = new[]
         {
@@ -131,12 +116,7 @@ public sealed class JulgateBrowserTests
 
         foreach (var viewport in viewports)
         {
-            await using var context = await NewAuthenticatedContextAsync(
-                browser,
-                storageStatePath,
-                viewport.Width,
-                viewport.Height);
-            var page = await context.NewPageAsync();
+            await page.SetViewportSizeAsync(viewport.Width, viewport.Height);
             await page.GotoAsync(
                 _baseUrl,
                 new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
@@ -150,7 +130,7 @@ public sealed class JulgateBrowserTests
         }
     }
 
-    private async Task VerifyPrimaryPagesAsync(IBrowser browser, string storageStatePath)
+    private async Task VerifyPrimaryPagesAsync(IPage page)
     {
         var routes = new[]
         {
@@ -170,15 +150,10 @@ public sealed class JulgateBrowserTests
 
         foreach (var viewport in viewports)
         {
-            await using var context = await NewAuthenticatedContextAsync(
-                browser,
-                storageStatePath,
-                viewport.Width,
-                viewport.Height);
-            var page = await context.NewPageAsync();
-
+            await page.SetViewportSizeAsync(viewport.Width, viewport.Height);
             foreach (var route in routes)
             {
+                Console.WriteLine($"Checking {route} at {viewport.Width}x{viewport.Height}.");
                 var response = await page.GotoAsync(
                     $"{_baseUrl}{route}",
                     new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
@@ -190,29 +165,12 @@ public sealed class JulgateBrowserTests
         }
     }
 
-    private static async Task<IBrowserContext> NewAuthenticatedContextAsync(
-        IBrowser browser,
-        string storageStatePath,
-        int width,
-        int height)
-    {
-        var context = await browser.NewContextAsync(new BrowserNewContextOptions
-        {
-            ViewportSize = new ViewportSize { Width = width, Height = height },
-            IgnoreHTTPSErrors = true,
-            StorageStatePath = storageStatePath
-        });
-        context.SetDefaultTimeout(10_000);
-        context.SetDefaultNavigationTimeout(20_000);
-        return context;
-    }
-
     private static async Task AssertPageIsResponsiveAsync(IPage page)
     {
         await page.WaitForFunctionAsync(
             "() => !document.body.innerText.includes('MATGATE')",
             null,
-            new PageWaitForFunctionOptions { Timeout = 10_000 });
+            new PageWaitForFunctionOptions { Timeout = 5_000 });
         var bodyText = await page.Locator("body").InnerTextAsync();
         Assert.Contains("Julgate", bodyText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("MATGATE", bodyText, StringComparison.Ordinal);
