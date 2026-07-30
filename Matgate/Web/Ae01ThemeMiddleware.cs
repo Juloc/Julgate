@@ -62,8 +62,11 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
           migrate(window.localStorage);
           migrate(window.sessionStorage);
           const startBranding = () => {
-            document.title = brand(document.title);
-            brandTree(document.documentElement);
+            const sweep = () => {
+              document.title = brand(document.title);
+              brandTree(document.documentElement);
+            };
+            sweep();
             const observer = new MutationObserver(records => {
               records.forEach(record => {
                 if (record.type === 'characterData') brandTree(record.target);
@@ -72,6 +75,15 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
               document.title = brand(document.title);
             });
             observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+
+            // The legacy client shell writes parts of the header asynchronously during boot.
+            // Repeat a bounded sweep so late writes cannot restore product-facing Matgate text.
+            let remainingSweeps = 80;
+            const sweepTimer = window.setInterval(() => {
+              sweep();
+              remainingSweeps -= 1;
+              if (remainingSweeps <= 0) window.clearInterval(sweepTimer);
+            }, 100);
           };
           if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', startBranding, { once: true });
