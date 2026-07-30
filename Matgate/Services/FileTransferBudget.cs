@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace Matgate.Services;
 
-internal sealed class FileTransferLimitExceededException(string message) : InvalidDataException(message);
+internal sealed class FileTransferLimitExceededException(string message) : IOException(message);
 
 internal static class FileTransferBudget
 {
