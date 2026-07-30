@@ -1,0 +1,15 @@
+# Use this overlay only during credential-key rotation.
+# The previous key file is removed after Julgate has started once with the new
+# primary key and a second restart succeeds without this overlay.
+
+services:
+  julgate:
+    environment:
+      JULGATE_CREDENTIAL_KEY_PREVIOUS: ""
+      JULGATE_CREDENTIAL_KEY_PREVIOUS_FILE: /run/secrets/julgate_credential_key_previous
+    secrets:
+      - julgate_credential_key_previous
+
+secrets:
+  julgate_credential_key_previous:
+    file: ${JULGATE_CREDENTIAL_KEY_PREVIOUS_SECRET_FILE:-./secrets/julgate_credential_key_previous}

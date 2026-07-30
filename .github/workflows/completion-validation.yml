@@ -1,0 +1,163 @@
+name: Julgate completion validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: julgate-completion-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-e2e:
+    name: Playwright responsive, auth and migration E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      JULGATE_ADMIN_USER: admin
+      JULGATE_ADMIN_PASSWORD: ci-only-password-with-16-characters
+      JULGATE_GUACAMOLE_JSON_SECRET_KEY: fedcba98765432100123456789abcdef
+      JULGATE_BIND_ADDRESS: 127.0.0.1
+      JULGATE_PORT: 8088
+      JULGATE_REQUIRE_SECURE_COOKIES: "false"
+      JULGATE_DNS_SERVER: 1.1.1.1
+      JULGATE_DNS_SEARCH: local
+      JULGATE_BASE_URL: http://127.0.0.1:8088
+      JULGATE_E2E_ARTIFACTS: artifacts/e2e
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: latest
+          dotnet-channel: "10.0"
+
+      - name: Create ephemeral secrets and legacy data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p secrets artifacts/migration-data
+          printf '%s' "$JULGATE_ADMIN_PASSWORD" > secrets/julgate_admin_password
+          printf '%s' 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' > secrets/julgate_credential_key
+          cat > artifacts/migration-data/servers.json <<'JSON'
+          [{
+            "name": "Legacy RDP",
+            "protocol": 0,
+            "host": "192.168.10.20",
+            "port": 3389,
+            "password": "legacy-container-secret",
+            "isEnabled": true
+          }]
+          JSON
+          chmod 0777 artifacts/migration-data
+          chmod 0666 artifacts/migration-data/servers.json
+
+      - name: Start hardened staging stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose=(docker compose -f docker-compose.yml -f docker-compose-secrets.yaml -f docker-compose-migration-test.yml)
+          "${compose[@]}" up --detach --build
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8088/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          "${compose[@]}" logs --no-color
+          exit 1
+
+      - name: Verify legacy migration and private permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose=(docker compose -f docker-compose.yml -f docker-compose-secrets.yaml -f docker-compose-migration-test.yml)
+          "${compose[@]}" exec -T julgate sh -eu -c '
+            test -f /data/servers.json
+            test -f /data/servers.json.bak
+            ! grep --quiet "legacy-container-secret" /data/servers.json
+            ! grep --quiet "legacy-container-secret" /data/servers.json.bak
+            grep --quiet "julgate-aesgcm:v1:" /data/servers.json
+            grep --quiet "julgate-aesgcm:v1:" /data/servers.json.bak
+            test "$(stat -c %a /data/servers.json)" = "600"
+            test "$(stat -c %a /data/servers.json.bak)" = "600"
+          '
+
+      - name: Build E2E tests
+        run: dotnet build Matgate.E2E/Matgate.E2E.csproj --configuration Release
+
+      - name: Install Playwright Chromium
+        shell: pwsh
+        run: ./Matgate.E2E/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Run Playwright tests
+        shell: bash
+        run: |
+          timeout --signal=TERM --kill-after=30s 4m \
+            dotnet test Matgate.E2E/Matgate.E2E.csproj \
+              --configuration Release \
+              --no-build \
+              --logger "console;verbosity=normal" \
+              --blame-hang \
+              --blame-hang-timeout 3m
+
+      - name: Upload responsive screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: julgate-responsive-e2e
+          path: artifacts/e2e
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Show stack logs
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose-secrets.yaml -f docker-compose-migration-test.yml logs --no-color
+
+      - name: Stop staging stack
+        if: always()
+        shell: bash
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose-secrets.yaml -f docker-compose-migration-test.yml down --volumes --remove-orphans || true
+          docker run --rm --volume "$PWD/artifacts:/target" alpine:3.22 sh -eu -c 'rm -rf /target/migration-data' || true
+          rm -rf secrets || true
+
+  container-security:
+    name: Trivy image and configuration scan
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build scan image
+        run: docker build --file Matgate/Dockerfile --tag julgate-completion:${{ github.sha }} .
+
+      - name: Scan image vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: julgate-completion:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
+      - name: Scan Docker and workflow configuration
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL

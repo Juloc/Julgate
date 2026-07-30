@@ -9,6 +9,7 @@ public static class SecretFileBootstrap
     {
         Promote("JULGATE_ADMIN_PASSWORD");
         Promote("JULGATE_CREDENTIAL_KEY");
+        Promote("JULGATE_CREDENTIAL_KEY_PREVIOUS");
         Promote("JULGATE_GUACAMOLE_JSON_SECRET_KEY");
         Promote("MATGATE_ADMIN_PASSWORD");
         Promote("MATGATE_GUACAMOLE_JSON_SECRET_KEY");

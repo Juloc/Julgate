@@ -1,0 +1,93 @@
+name: Julgate file protocol integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: julgate-file-protocols-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  file-roundtrips:
+    name: SFTP FTP and SMB roundtrips
+    runs-on: ubuntu-24.04
+    env:
+      JULGATE_RUN_FILE_INTEGRATION: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: latest
+          dotnet-channel: "10.0"
+
+      - name: Start protocol test servers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/smb
+          chmod 0777 artifacts/smb
+
+          docker run --detach --name julgate-sftp \
+            --publish 2222:22 \
+            atmoz/sftp:alpine \
+            test:password:1001::upload
+
+          docker run --detach --name julgate-ftp \
+            --publish 2121:21 \
+            --publish 21100-21110:21100-21110 \
+            --env FTP_USER=test \
+            --env FTP_PASS=password \
+            --env PASV_ADDRESS=127.0.0.1 \
+            --env PASV_MIN_PORT=21100 \
+            --env PASV_MAX_PORT=21110 \
+            fauria/vsftpd
+
+          docker run --detach --name julgate-smb \
+            --publish 445:445 \
+            --volume "$PWD/artifacts/smb:/share" \
+            dperson/samba \
+            -u "test;password" \
+            -s "public;/share;yes;no;no;test" \
+            -p
+
+          for port in 2222 2121 445; do
+            ready=false
+            for attempt in {1..45}; do
+              if (echo >"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; then
+                ready=true
+                break
+              fi
+              sleep 2
+            done
+            if [[ "$ready" != "true" ]]; then
+              docker logs julgate-sftp || true
+              docker logs julgate-ftp || true
+              docker logs julgate-smb || true
+              exit 1
+            fi
+          done
+
+      - name: Run real file gateway tests
+        run: dotnet test Matgate.Tests/Matgate.Tests.csproj --configuration Release --filter FullyQualifiedName~FileProtocolIntegrationTests --logger "console;verbosity=normal"
+
+      - name: Show protocol logs
+        if: failure()
+        run: |
+          docker logs julgate-sftp || true
+          docker logs julgate-ftp || true
+          docker logs julgate-smb || true
+
+      - name: Stop protocol test servers
+        if: always()
+        run: docker rm --force julgate-sftp julgate-ftp julgate-smb || true

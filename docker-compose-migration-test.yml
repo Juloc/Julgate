@@ -1,0 +1,4 @@
+services:
+  julgate:
+    volumes:
+      - ./artifacts/migration-data:/data

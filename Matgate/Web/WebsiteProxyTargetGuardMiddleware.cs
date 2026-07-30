@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Sockets;
 using Matgate.Models;
 using Matgate.Services;
 
@@ -10,8 +9,6 @@ public sealed class WebsiteProxyTargetGuardMiddleware
     private readonly RequestDelegate _next;
     private readonly JsonDataStore _store;
     private readonly bool _websiteProxyEnabled;
-    private readonly bool _allowDnsTargets;
-    private readonly HashSet<string> _allowedHosts;
 
     public WebsiteProxyTargetGuardMiddleware(
         RequestDelegate next,
@@ -21,12 +18,6 @@ public sealed class WebsiteProxyTargetGuardMiddleware
         _next = next;
         _store = store;
         _websiteProxyEnabled = ReadBoolean(configuration, "JULGATE_ENABLE_WEBSITE_PROXY", false);
-        _allowDnsTargets = ReadBoolean(configuration, "JULGATE_ALLOW_WEBSITE_PROXY_DNS", false);
-        _allowedHosts = (Environment.GetEnvironmentVariable("JULGATE_WEBSITE_PROXY_ALLOWED_HOSTS")
-                         ?? configuration["Julgate:WebsiteProxyAllowedHosts"]
-                         ?? "")
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -52,7 +43,7 @@ public sealed class WebsiteProxyTargetGuardMiddleware
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.Response.ContentType = "text/plain; charset=utf-8";
             await context.Response.WriteAsync(
-                "Website proxy target is blocked by the Julgate destination policy.",
+                "Website proxy targets must use an explicit, permitted IP address. DNS names are blocked to prevent DNS rebinding.",
                 context.RequestAborted);
             return;
         }
@@ -60,34 +51,12 @@ public sealed class WebsiteProxyTargetGuardMiddleware
         await _next(context);
     }
 
-    internal async Task<bool> IsAllowedAsync(Uri target, CancellationToken cancellationToken)
+    internal static Task<bool> IsAllowedAsync(Uri target, CancellationToken cancellationToken)
     {
-        if (IPAddress.TryParse(target.Host, out var literalAddress))
-        {
-            return !IsDisallowedAddress(literalAddress);
-        }
-
-        if (!_allowDnsTargets)
-        {
-            return false;
-        }
-
-        if (_allowedHosts.Count == 0 || !_allowedHosts.Contains(target.Host))
-        {
-            return false;
-        }
-
-        IPAddress[] addresses;
-        try
-        {
-            addresses = await Dns.GetHostAddressesAsync(target.DnsSafeHost, cancellationToken);
-        }
-        catch (Exception exception) when (exception is SocketException or ArgumentException)
-        {
-            return false;
-        }
-
-        return addresses.Length > 0 && addresses.All(address => !IsDisallowedAddress(address));
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(
+            IPAddress.TryParse(target.Host, out var literalAddress)
+            && !IsDisallowedAddress(literalAddress));
     }
 
     internal static bool IsDisallowedAddress(IPAddress address)
