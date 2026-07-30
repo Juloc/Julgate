@@ -29,15 +29,17 @@ public sealed class JulgateBrowserTests
         });
         context.SetDefaultTimeout(5_000);
         context.SetDefaultNavigationTimeout(10_000);
-        var page = await context.NewPageAsync();
 
+        var loginPage = await context.NewPageAsync();
         Console.WriteLine("Checking anonymous protection and branding.");
-        await VerifyAnonymousRoutesAsync(page);
-        await VerifyLegacyStorageMigrationAsync(page);
+        await VerifyAnonymousRoutesAsync(loginPage);
+        await VerifyLegacyStorageMigrationAsync(loginPage);
 
         Console.WriteLine("Signing in once for all authenticated checks.");
-        await LoginAsync(page);
+        await LoginAsync(loginPage);
+        await loginPage.CloseAsync();
 
+        var page = await context.NewPageAsync();
         Console.WriteLine("Checking responsive shell screenshots.");
         await VerifyResponsiveShellAsync(page);
 
