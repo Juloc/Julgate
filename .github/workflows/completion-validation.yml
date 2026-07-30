@@ -75,16 +75,21 @@ jobs:
           "${compose[@]}" logs --no-color
           exit 1
 
-      - name: Verify legacy migration at rest
+      - name: Verify legacy migration and private permissions
         shell: bash
         run: |
           set -euo pipefail
-          test -f artifacts/migration-data/servers.json
-          test -f artifacts/migration-data/servers.json.bak
-          ! grep --quiet 'legacy-container-secret' artifacts/migration-data/servers.json
-          ! grep --quiet 'legacy-container-secret' artifacts/migration-data/servers.json.bak
-          grep --quiet 'julgate-aesgcm:v1:' artifacts/migration-data/servers.json
-          grep --quiet 'julgate-aesgcm:v1:' artifacts/migration-data/servers.json.bak
+          compose=(docker compose -f docker-compose.yml -f docker-compose-secrets.yaml -f docker-compose-migration-test.yml)
+          "${compose[@]}" exec -T julgate sh -eu -c '
+            test -f /data/servers.json
+            test -f /data/servers.json.bak
+            ! grep --quiet "legacy-container-secret" /data/servers.json
+            ! grep --quiet "legacy-container-secret" /data/servers.json.bak
+            grep --quiet "julgate-aesgcm:v1:" /data/servers.json
+            grep --quiet "julgate-aesgcm:v1:" /data/servers.json.bak
+            test "$(stat -c %a /data/servers.json)" = "600"
+            test "$(stat -c %a /data/servers.json.bak)" = "600"
+          '
 
       - name: Build E2E tests
         run: dotnet build Matgate.E2E/Matgate.E2E.csproj --configuration Release
@@ -111,8 +116,10 @@ jobs:
 
       - name: Stop staging stack
         if: always()
+        shell: bash
         run: |
           docker compose -f docker-compose.yml -f docker-compose-secrets.yaml -f docker-compose-migration-test.yml down --volumes --remove-orphans || true
+          docker run --rm --volume "$PWD/artifacts:/target" alpine:3.22 sh -c 'chmod -R u+rwX /target 2>/dev/null || true' || true
           rm -rf secrets artifacts/migration-data
 
   container-security:
