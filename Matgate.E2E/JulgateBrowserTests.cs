@@ -117,11 +117,8 @@ public sealed class JulgateBrowserTests
         foreach (var viewport in viewports)
         {
             await page.SetViewportSizeAsync(viewport.Width, viewport.Height);
-            await page.GotoAsync(
-                _baseUrl,
-                new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+            await NavigateAuthenticatedAsync(page, "/");
             await AssertPageIsResponsiveAsync(page);
-            Assert.True(await page.Locator("nav, [role=navigation]").CountAsync() > 0);
             await page.ScreenshotAsync(new PageScreenshotOptions
             {
                 Path = Path.Combine(_artifactDirectory, $"julgate-{viewport.Name}.png"),
@@ -154,15 +151,29 @@ public sealed class JulgateBrowserTests
             foreach (var route in routes)
             {
                 Console.WriteLine($"Checking {route} at {viewport.Width}x{viewport.Height}.");
-                var response = await page.GotoAsync(
-                    $"{_baseUrl}{route}",
-                    new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+                var response = await NavigateAuthenticatedAsync(page, route);
                 Assert.NotNull(response);
                 Assert.True(response!.Status < 400, $"{route} returned HTTP {response.Status}.");
                 Assert.DoesNotContain("/login", page.Url, StringComparison.OrdinalIgnoreCase);
                 await AssertPageIsResponsiveAsync(page);
             }
         }
+    }
+
+    private async Task<IResponse?> NavigateAuthenticatedAsync(IPage page, string route)
+    {
+        var response = await page.GotoAsync(
+            $"{_baseUrl}{route}",
+            new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.Commit,
+                Timeout = 10_000
+            });
+        await page.WaitForFunctionAsync(
+            "() => document.body && document.body.innerText.trim().length > 0 && document.querySelector('nav, [role=\"navigation\"]')",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 10_000 });
+        return response;
     }
 
     private static async Task AssertPageIsResponsiveAsync(IPage page)
