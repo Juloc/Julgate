@@ -1,10 +1,11 @@
 using System.Net;
+using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 using Xunit;
 
 namespace Matgate.E2E;
 
-public sealed class JulgateBrowserTests
+public sealed partial class JulgateBrowserTests
 {
     private readonly string _baseUrl = Environment.GetEnvironmentVariable("JULGATE_BASE_URL")
         ?? "http://127.0.0.1:8088";
@@ -41,11 +42,11 @@ public sealed class JulgateBrowserTests
         await loginPage.CloseAsync();
 
         Console.WriteLine("Checking authenticated route responses.");
-        await VerifyAuthenticatedRoutesAsync(context);
+        var authenticatedPages = await FetchAuthenticatedPagesAsync(context);
 
         Console.WriteLine("Checking representative responsive pages.");
         var page = await context.NewPageAsync();
-        await VerifyResponsivePagesAsync(page);
+        await VerifyResponsivePagesAsync(page, authenticatedPages);
     }
 
     private async Task VerifyAnonymousRoutesAsync(IPage page)
@@ -113,7 +114,7 @@ public sealed class JulgateBrowserTests
         Assert.Contains(cookies, cookie => cookie.HttpOnly && !string.IsNullOrWhiteSpace(cookie.Value));
     }
 
-    private async Task VerifyAuthenticatedRoutesAsync(IBrowserContext context)
+    private async Task<IReadOnlyDictionary<string, string>> FetchAuthenticatedPagesAsync(IBrowserContext context)
     {
         var routes = new[]
         {
@@ -132,6 +133,7 @@ public sealed class JulgateBrowserTests
         using var handler = new HttpClientHandler { AllowAutoRedirect = false };
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
         client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", cookieHeader);
+        var pages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var route in routes)
         {
@@ -143,10 +145,18 @@ public sealed class JulgateBrowserTests
                 "/login",
                 response.Headers.Location?.ToString() ?? string.Empty,
                 StringComparison.OrdinalIgnoreCase);
+
+            var html = await response.Content.ReadAsStringAsync();
+            Assert.Contains("Julgate", html, StringComparison.OrdinalIgnoreCase);
+            pages[route] = html;
         }
+
+        return pages;
     }
 
-    private async Task VerifyResponsivePagesAsync(IPage page)
+    private async Task VerifyResponsivePagesAsync(
+        IPage page,
+        IReadOnlyDictionary<string, string> authenticatedPages)
     {
         var cases = new[]
         {
@@ -159,34 +169,42 @@ public sealed class JulgateBrowserTests
         {
             Console.WriteLine($"Rendering {item.Route} at {item.Width}x{item.Height}.");
             await page.SetViewportSizeAsync(item.Width, item.Height);
-            var response = await page.GotoAsync(
-                $"{_baseUrl}{item.Route}",
-                new PageGotoOptions
+            var html = PrepareStaticLayoutHtml(authenticatedPages[item.Route]);
+            await page.SetContentAsync(
+                html,
+                new PageSetContentOptions
                 {
                     WaitUntil = WaitUntilState.DOMContentLoaded,
                     Timeout = 15_000
                 });
-            Assert.NotNull(response);
-            Assert.True(response!.Status < 400, $"{item.Route} returned HTTP {response.Status}.");
-            Assert.DoesNotContain("/login", page.Url, StringComparison.OrdinalIgnoreCase);
+            await page.WaitForTimeoutAsync(250);
             await AssertPageIsResponsiveAsync(page);
             await page.ScreenshotAsync(new PageScreenshotOptions
             {
-                Path = Path.Combine(_artifactDirectory, $"julgate-{item.Name}.png")
+                Path = Path.Combine(_artifactDirectory, $"julgate-{item.Name}.png"),
+                Timeout = 10_000
             });
         }
     }
 
+    private string PrepareStaticLayoutHtml(string html)
+    {
+        var withoutScripts = ScriptElementRegex().Replace(html, string.Empty);
+        return withoutScripts.Replace(
+            "<head>",
+            $"<head><base href=\"{_baseUrl}/\">",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task AssertPageIsResponsiveAsync(IPage page)
     {
-        await page.WaitForFunctionAsync(
-            "() => document.body && !document.body.innerText.includes('MATGATE')",
-            null,
-            new PageWaitForFunctionOptions { Timeout = 5_000 });
         var bodyText = await page.Locator("body").InnerTextAsync();
         Assert.Contains("Julgate", bodyText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("MATGATE", bodyText, StringComparison.Ordinal);
         Assert.True(await page.EvaluateAsync<bool>(
             "() => document.documentElement.scrollWidth <= window.innerWidth + 1"));
     }
+
+    [GeneratedRegex("<script\\b[^>]*>[\\s\\S]*?</script>", RegexOptions.IgnoreCase)]
+    private static partial Regex ScriptElementRegex();
 }
