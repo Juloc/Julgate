@@ -1,0 +1,76 @@
+name: Verify published Julgate 0.7.0
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/verify-published-0.7.0.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  verify-image:
+    name: Pull and start ghcr.io/juloc/julgate:0.7.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull immutable image
+        run: docker pull ghcr.io/juloc/julgate:0.7.0
+
+      - name: Verify image metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=ghcr.io/juloc/julgate:0.7.0
+          test "$(docker image inspect "$image" --format '{{.Config.User}}')" != ""
+          version="$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')"
+          test "$version" = "0.7.0"
+
+      - name: Start and smoke test image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker volume create julgate-published-test >/dev/null
+          docker run --detach --name julgate-published-test \
+            --publish 127.0.0.1:18089:8080 \
+            --volume julgate-published-test:/data \
+            --env ASPNETCORE_URLS=http://+:8080 \
+            --env JULGATE_DATA_DIR=/data \
+            --env JULGATE_ADMIN_USER=admin \
+            --env JULGATE_ADMIN_PASSWORD=ci-only-password-with-16-characters \
+            --env JULGATE_CREDENTIAL_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= \
+            --env JULGATE_GUACAMOLE_JSON_SECRET_KEY=fedcba98765432100123456789abcdef \
+            --env Guacamole__JsonSecretKey=fedcba98765432100123456789abcdef \
+            --env JULGATE_REQUIRE_SECURE_COOKIES=false \
+            ghcr.io/juloc/julgate:0.7.0
+
+          for attempt in {1..45}; do
+            if curl --fail --silent http://127.0.0.1:18089/healthz >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" == "45" ]]; then
+              docker logs julgate-published-test
+              exit 1
+            fi
+            sleep 2
+          done
+
+          curl --fail --silent http://127.0.0.1:18089/login | grep --quiet 'Julgate'
+          curl --fail --silent http://127.0.0.1:18089/manifest.webmanifest | grep --quiet 'Julgate'
+          test "$(docker inspect julgate-published-test --format '{{.Config.User}}')" != ""
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm --force julgate-published-test >/dev/null 2>&1 || true
+          docker volume rm julgate-published-test >/dev/null 2>&1 || true
