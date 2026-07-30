@@ -2560,6 +2560,7 @@ public sealed class HtmlViews
             clipboard = Icon("clipboard"),
             upload = Icon("upload"),
             pointer = Icon("pointer"),
+            rightClick = Icon("menu"),
             keyboard = Icon("keyboard"),
             resolution = Icon("monitor"),
             zoomIn = Icon("zoom-in"),
@@ -2597,6 +2598,7 @@ public sealed class HtmlViews
             xferDownloading = Language(context) == "de" ? "Lade herunter" : "Downloading",
             pointerTouchpad = Language(context) == "de" ? "Zeiger: Touchpad (wischen bewegt den Cursor)" : "Pointer: touchpad (swipe to move)",
             pointerDirect = Language(context) == "de" ? "Zeiger: Direkt (tippen = an diese Stelle)" : "Pointer: direct (tap to position)",
+            rightClick = Language(context) == "de" ? "Rechtsklick (an Cursor-Position)" : "Right click (at cursor)",
             showKeyboard = Language(context) == "de" ? "Tastatur ein-/ausblenden" : "Show/hide keyboard",
             resolutionLabel = Language(context) == "de" ? "Aufloesung" : "Resolution",
             resolutionFitShort = Language(context) == "de" ? "Anpassen" : "Fit",
@@ -4184,9 +4186,15 @@ public sealed class HtmlViews
                 }
 
                 if (immersiveHandle) {
+                    // Open on pointerdown so a single tap (or click) is enough on every device -
+                    // no precise swipe or click-delay to fight on iOS. The bar auto-hides again.
+                    immersiveHandle.addEventListener('pointerdown', event => {
+                        event.preventDefault();
+                        openImmersiveBar();
+                    });
                     immersiveHandle.addEventListener('click', event => {
                         event.preventDefault();
-                        toggleImmersiveBar();
+                        openImmersiveBar();
                     });
                 }
 
@@ -4238,6 +4246,21 @@ public sealed class HtmlViews
                     }
                 }, { passive: true });
 
+                // Send a right-click at the last known cursor position (touch cursor mode has no
+                // native right-click gesture, so a toolbar button drives it).
+                function sendRightClick(tab) {
+                    if (!tab || !tab.client) {
+                        return;
+                    }
+                    const p = tab.lastPointer || { x: 0, y: 0 };
+                    const down = { x: p.x, y: p.y, left: false, middle: false, right: true, up: false, down: false };
+                    const up = { x: p.x, y: p.y, left: false, middle: false, right: false, up: false, down: false };
+                    tab.client.sendMouseState(down, true);
+                    window.setTimeout(() => {
+                        try { tab.client.sendMouseState(up, true); } catch {}
+                    }, 60);
+                }
+
                 function updateTabActions() {
                     if (!connectionTabActions) {
                         updateStatusBar();
@@ -4279,6 +4302,14 @@ public sealed class HtmlViews
                                 pointerMode === 'touchpad' ? 'active' : '',
                                 true);
                             connectionTabActions.appendChild(pointerButton);
+
+                            const rightClickButton = createTabActionButton(
+                                actionIcons.rightClick,
+                                uiText.rightClick || 'Right click',
+                                () => sendRightClick(tab),
+                                '',
+                                true);
+                            connectionTabActions.appendChild(rightClickButton);
 
                             if (tab.oskInput) {
                                 const keyboardButton = createTabActionButton(
@@ -5505,13 +5536,17 @@ public sealed class HtmlViews
                         };
 
                         const mouse = new Guacamole.Mouse(display.getElement());
-                        mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = state => client.sendMouseState(state, true);
+                        mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = state => {
+                            tab.lastPointer = { x: state.x, y: state.y };
+                            client.sendMouseState(state, true);
+                        };
 
                         // Two touch pointer emulators; only the active mode forwards. "touchpad" = relative
                         // (swipe moves the cursor like a laptop trackpad), "direct" = absolute (tap positions).
                         tab.pointerMode = pointerMode;
                         const forwardTouch = wanted => state => {
                             if (tab.pointerMode === wanted) {
+                                tab.lastPointer = { x: state.x, y: state.y };
                                 client.sendMouseState(state, true);
                                 if (wanted === 'touchpad') {
                                     edgeScrollToCursor(tab, state.x, state.y);
