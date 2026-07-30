@@ -20,11 +20,13 @@ public sealed class PathSecurityHostingStartup : IHostingStartup
         {
             return app =>
             {
+                app.UseMiddleware<RequestBodyLimitMiddleware>();
                 app.UseMiddleware<PathTraversalGuardMiddleware>();
                 app.UseMiddleware<CrossOriginGuardMiddleware>();
                 app.UseMiddleware<WebsiteProxyTargetGuardMiddleware>();
                 app.UseMiddleware<ArchiveExtractionGuardMiddleware>();
                 app.UseMiddleware<NetworkToolsAdminGuardMiddleware>();
+                app.UseMiddleware<PreferenceCookieCompatibilityMiddleware>();
                 app.UseMiddleware<WorkspaceCookieHardeningMiddleware>();
                 next(app);
             };
