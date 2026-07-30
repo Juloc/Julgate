@@ -95,8 +95,10 @@ jobs:
             sleep 2
           done
 
-          curl --fail --silent http://127.0.0.1:18089/login | grep --quiet 'Julgate'
-          curl --fail --silent http://127.0.0.1:18089/manifest.webmanifest | grep --quiet 'Julgate'
+          curl --fail --silent --output /tmp/julgate-login.html http://127.0.0.1:18089/login
+          curl --fail --silent --output /tmp/julgate-manifest.json http://127.0.0.1:18089/manifest.webmanifest
+          grep --quiet 'Julgate' /tmp/julgate-login.html
+          grep --quiet 'Julgate' /tmp/julgate-manifest.json
           test "$(docker inspect julgate-published-test --format '{{.Config.User}}')" != ""
 
       - name: Cleanup
