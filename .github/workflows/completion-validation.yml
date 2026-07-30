@@ -128,8 +128,8 @@ jobs:
         shell: bash
         run: |
           docker compose -f docker-compose.yml -f docker-compose-secrets.yaml -f docker-compose-migration-test.yml down --volumes --remove-orphans || true
-          docker run --rm --volume "$PWD/artifacts:/target" alpine:3.22 sh -c 'chmod -R u+rwX /target 2>/dev/null || true' || true
-          rm -rf secrets artifacts/migration-data
+          docker run --rm --volume "$PWD/artifacts:/target" alpine:3.22 sh -eu -c 'rm -rf /target/migration-data' || true
+          rm -rf secrets || true
 
   container-security:
     name: Trivy image and configuration scan
