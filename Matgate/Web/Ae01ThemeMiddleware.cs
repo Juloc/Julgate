@@ -59,12 +59,20 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
             const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
             while (walker.nextNode()) brandTree(walker.currentNode);
           };
+          const brandSplitLogos = () => {
+            document.querySelectorAll('.brand-word').forEach(element => {
+              if ((element.textContent || '').replace(/\s+/g, '').toUpperCase() === 'MATGATE') {
+                element.innerHTML = '<span>JUL</span>GATE';
+              }
+            });
+          };
           migrate(window.localStorage);
           migrate(window.sessionStorage);
           const startBranding = () => {
             const sweep = () => {
               document.title = brand(document.title);
               brandTree(document.documentElement);
+              brandSplitLogos();
             };
             sweep();
             const observer = new MutationObserver(records => {
@@ -73,6 +81,7 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
                 record.addedNodes.forEach(brandTree);
               });
               document.title = brand(document.title);
+              brandSplitLogos();
             });
             observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
 
@@ -205,6 +214,10 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
     internal static string ApplyBranding(string content)
     {
         return content
+            .Replace(
+                "<span class=\"brand-word\"><span>MAT</span>GATE</span>",
+                "<span class=\"brand-word\"><span>JUL</span>GATE</span>",
+                StringComparison.Ordinal)
             .Replace("Matgate", "Julgate", StringComparison.Ordinal)
             .Replace("MATGATE", "JULGATE", StringComparison.Ordinal)
             .Replace("matgate.workspace.tabs.v2", "julgate.workspace.tabs.v2", StringComparison.Ordinal)
