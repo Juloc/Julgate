@@ -100,13 +100,15 @@ jobs:
         run: ./Matgate.E2E/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
       - name: Run Playwright tests
-        run: >-
-          dotnet test Matgate.E2E/Matgate.E2E.csproj
-          --configuration Release
-          --no-build
-          --logger "console;verbosity=normal"
-          --blame-hang
-          --blame-hang-timeout 3m
+        shell: bash
+        run: |
+          timeout --signal=TERM --kill-after=30s 4m \
+            dotnet test Matgate.E2E/Matgate.E2E.csproj \
+              --configuration Release \
+              --no-build \
+              --logger "console;verbosity=normal" \
+              --blame-hang \
+              --blame-hang-timeout 3m
 
       - name: Upload responsive screenshots
         if: always()
