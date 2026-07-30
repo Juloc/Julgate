@@ -1,0 +1,84 @@
+name: Julgate operations validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: julgate-operations-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backup-restore:
+    name: Backup and restore drill
+    runs-on: ubuntu-24.04
+    env:
+      SOURCE_DATA: julgate-ci-source-data
+      SOURCE_DRIVES: julgate-ci-source-drives
+      TARGET_DATA: julgate-ci-target-data
+      TARGET_DRIVES: julgate-ci-target-drives
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate script syntax
+        run: bash -n scripts/backup.sh scripts/restore.sh scripts/rotate-credential-key.sh scripts/verify-deployment.sh
+
+      - name: Seed source volumes
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker volume create "$SOURCE_DATA" >/dev/null
+          docker volume create "$SOURCE_DRIVES" >/dev/null
+          docker run --rm --volume "$SOURCE_DATA:/target" alpine:3.22 sh -eu -c \
+            'mkdir -p /target/workspaces/demo /target/keys; printf "%s" "users-state" > /target/users.json; printf "%s" "hidden-state" > /target/.state; printf "%s" "workspace-state" > /target/workspaces/demo/file.txt'
+          docker run --rm --volume "$SOURCE_DRIVES:/target" alpine:3.22 sh -eu -c \
+            'mkdir -p /target/session; printf "%s" "drive-state" > /target/session/file.txt'
+
+      - name: Create backup
+        env:
+          JULGATE_DATA_VOLUME: ${{ env.SOURCE_DATA }}
+          JULGATE_DRIVES_VOLUME: ${{ env.SOURCE_DRIVES }}
+          JULGATE_IMAGE: ghcr.io/juloc/julgate:test
+        run: bash scripts/backup.sh artifacts/backup
+
+      - name: Restore into disposable volumes
+        env:
+          JULGATE_DATA_VOLUME: ${{ env.TARGET_DATA }}
+          JULGATE_DRIVES_VOLUME: ${{ env.TARGET_DRIVES }}
+        run: bash scripts/restore.sh artifacts/backup
+
+      - name: Verify restored content and overwrite protection
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --volume "$TARGET_DATA:/target:ro" alpine:3.22 cat /target/users.json)" = "users-state"
+          test "$(docker run --rm --volume "$TARGET_DATA:/target:ro" alpine:3.22 cat /target/.state)" = "hidden-state"
+          test "$(docker run --rm --volume "$TARGET_DATA:/target:ro" alpine:3.22 cat /target/workspaces/demo/file.txt)" = "workspace-state"
+          test "$(docker run --rm --volume "$TARGET_DRIVES:/target:ro" alpine:3.22 cat /target/session/file.txt)" = "drive-state"
+
+          if JULGATE_DATA_VOLUME="$TARGET_DATA" JULGATE_DRIVES_VOLUME="$TARGET_DRIVES" \
+            bash scripts/restore.sh artifacts/backup; then
+            echo "Restore unexpectedly overwrote non-empty volumes."
+            exit 1
+          fi
+
+      - name: Upload backup manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: julgate-restore-drill-manifest
+          path: |
+            artifacts/backup/manifest.env
+            artifacts/backup/SHA256SUMS
+          retention-days: 14
+
+      - name: Remove test volumes
+        if: always()
+        run: docker volume rm --force "$SOURCE_DATA" "$SOURCE_DRIVES" "$TARGET_DATA" "$TARGET_DRIVES" || true
