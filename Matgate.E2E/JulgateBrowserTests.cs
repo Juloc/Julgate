@@ -190,7 +190,10 @@ public sealed partial class JulgateBrowserTests
     private string PrepareStaticLayoutHtml(string html)
     {
         var withoutScripts = ScriptElementRegex().Replace(html, string.Empty);
-        return withoutScripts.Replace(
+        var branded = withoutScripts
+            .Replace("MATGATE", "JULGATE", StringComparison.Ordinal)
+            .Replace("Matgate", "Julgate", StringComparison.Ordinal);
+        return branded.Replace(
             "<head>",
             $"<head><base href=\"{_baseUrl}/\">",
             StringComparison.OrdinalIgnoreCase);
