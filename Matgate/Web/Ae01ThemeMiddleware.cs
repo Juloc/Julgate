@@ -35,8 +35,49 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
               }
             } catch { }
           };
+          const brand = value => typeof value === 'string'
+            ? value.replaceAll('MATGATE', 'JULGATE').replaceAll('Matgate', 'Julgate')
+            : value;
+          const brandTree = root => {
+            if (!root) return;
+            if (root.nodeType === Node.TEXT_NODE) {
+              const parent = root.parentElement;
+              if (!parent || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA'].includes(parent.tagName)) return;
+              const branded = brand(root.nodeValue);
+              if (branded !== root.nodeValue) root.nodeValue = branded;
+              return;
+            }
+            if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
+            if (root.nodeType === Node.ELEMENT_NODE) {
+              ['title', 'aria-label', 'alt', 'placeholder'].forEach(attribute => {
+                if (!root.hasAttribute(attribute)) return;
+                const current = root.getAttribute(attribute);
+                const branded = brand(current);
+                if (branded !== current) root.setAttribute(attribute, branded);
+              });
+            }
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            while (walker.nextNode()) brandTree(walker.currentNode);
+          };
           migrate(window.localStorage);
           migrate(window.sessionStorage);
+          const startBranding = () => {
+            document.title = brand(document.title);
+            brandTree(document.documentElement);
+            const observer = new MutationObserver(records => {
+              records.forEach(record => {
+                if (record.type === 'characterData') brandTree(record.target);
+                record.addedNodes.forEach(brandTree);
+              });
+              document.title = brand(document.title);
+            });
+            observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+          };
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startBranding, { once: true });
+          } else {
+            startBranding();
+          }
         })();
         </script>
         """;
