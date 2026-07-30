@@ -25,11 +25,11 @@ env:
 jobs:
   build:
     name: Build Julgate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate Compose files
         env:
@@ -40,6 +40,7 @@ jobs:
           mkdir -p secrets
           printf '%s' 'ci-only-password-with-16-characters' > secrets/julgate_admin_password
           printf '%s' 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' > secrets/julgate_credential_key
+          printf '%s' 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo1MjM0NTY=' > secrets/julgate_credential_key_previous
 
           docker compose -f docker-compose.yml config >/dev/null
           docker compose -f docker-compose-simple.yaml config >/dev/null
@@ -47,9 +48,13 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose-secrets.yaml config >/dev/null
           docker compose -f docker-compose-simple.yaml -f docker-compose-secrets.yaml config >/dev/null
           docker compose -f docker-compose-dockhand.yaml -f docker-compose-secrets.yaml config >/dev/null
+          docker compose -f docker-compose.yml -f docker-compose-secrets.yaml -f docker-compose-key-rotation.yaml config >/dev/null
+          docker compose -f docker-compose-simple.yaml -f docker-compose-secrets.yaml -f docker-compose-key-rotation.yaml config >/dev/null
+          docker compose -f docker-compose-dockhand.yaml -f docker-compose-secrets.yaml -f docker-compose-key-rotation.yaml config >/dev/null
+          docker compose -f docker-compose.yml -f docker-compose-secrets.yaml -f docker-compose-migration-test.yml config >/dev/null
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -70,6 +75,7 @@ jobs:
           JULGATE_REQUIRE_SECURE_COOKIES: "false"
           JULGATE_DNS_SERVER: 1.1.1.1
           JULGATE_DNS_SEARCH: local
+          JULGATE_MAX_REQUEST_BODY_BYTES: 1024
         shell: bash
         run: |
           set -euo pipefail
@@ -88,7 +94,7 @@ jobs:
           "${compose[@]}" up --detach --build
 
           ready=false
-          for attempt in {1..45}; do
+          for attempt in {1..60}; do
             if curl --fail --silent --show-error http://127.0.0.1:8088/healthz >/tmp/julgate-health.json; then
               ready=true
               break
@@ -103,10 +109,14 @@ jobs:
 
           curl --fail --silent --show-error --dump-header /tmp/julgate-headers.txt \
             --output /tmp/julgate-login.html http://127.0.0.1:8088/login
+          curl --fail --silent --show-error --output /tmp/julgate-manifest.json \
+            http://127.0.0.1:8088/manifest.webmanifest
           curl --fail --silent --show-error --output /tmp/guacamole.html \
             http://127.0.0.1:8088/guacamole/
           grep --ignore-case --quiet '^X-Content-Type-Options: nosniff' /tmp/julgate-headers.txt
           grep --quiet 'Julgate' /tmp/julgate-login.html
+          grep --quiet 'Julgate' /tmp/julgate-manifest.json
+          ! grep --quiet 'Matgate' /tmp/julgate-manifest.json
           "${compose[@]}" exec -T julgate sh -c \
             'test -r /run/secrets/julgate_admin_password && test -r /run/secrets/julgate_credential_key'
           "${compose[@]}" exec -T julgate sh -c \
@@ -119,11 +129,20 @@ jobs:
           traversal_status="$(curl --silent --output /dev/null --write-out '%{http_code}' 'http://127.0.0.1:8088/?path=folder%252f..%252fsecret')"
           csrf_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --request POST --header 'Origin: https://evil.invalid' http://127.0.0.1:8088/login)"
+          payload_status="$(python3 - <<'PY'
+          import http.client
+          connection = http.client.HTTPConnection('127.0.0.1', 8088)
+          connection.request('POST', '/login', body='x' * 2048, headers={'Content-Type': 'application/octet-stream'})
+          print(connection.getresponse().status)
+          connection.close()
+          PY
+          )"
           test "$website_status" = "404"
           test "$tools_status" = "404"
           test "$archive_status" = "404"
           test "$traversal_status" = "400"
           test "$csrf_status" = "403"
+          test "$payload_status" = "413"
 
           login_status=""
           for attempt in {1..11}; do
@@ -145,7 +164,7 @@ jobs:
           test -s artifacts/ui/julgate-login.png
 
       - name: Upload UI smoke screenshot
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: julgate-ui-smoke
           path: artifacts/ui/julgate-login.png
