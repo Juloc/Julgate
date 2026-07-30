@@ -191,6 +191,10 @@ public sealed partial class JulgateBrowserTests
     {
         var withoutScripts = ScriptElementRegex().Replace(html, string.Empty);
         var branded = withoutScripts
+            .Replace(
+                "<span class=\"brand-word\"><span>MAT</span>GATE</span>",
+                "<span class=\"brand-word\"><span>JUL</span>GATE</span>",
+                StringComparison.Ordinal)
             .Replace("MATGATE", "JULGATE", StringComparison.Ordinal)
             .Replace("Matgate", "Julgate", StringComparison.Ordinal);
         return branded.Replace(
