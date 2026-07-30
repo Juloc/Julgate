@@ -18,6 +18,7 @@ jobs:
   browser-e2e:
     name: Playwright responsive, auth and migration E2E
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     env:
       JULGATE_ADMIN_USER: admin
       JULGATE_ADMIN_PASSWORD: ci-only-password-with-16-characters
@@ -99,7 +100,13 @@ jobs:
         run: ./Matgate.E2E/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
       - name: Run Playwright tests
-        run: dotnet test Matgate.E2E/Matgate.E2E.csproj --configuration Release --no-build --logger "console;verbosity=normal"
+        run: >-
+          dotnet test Matgate.E2E/Matgate.E2E.csproj
+          --configuration Release
+          --no-build
+          --logger "console;verbosity=normal"
+          --blame-hang
+          --blame-hang-timeout 3m
 
       - name: Upload responsive screenshots
         if: always()
