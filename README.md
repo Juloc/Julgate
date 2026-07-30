@@ -1,191 +1,212 @@
-# Matgate
+# Julgate
 
-Matgate is a self-hosted gateway for your home network. It gives you one web UI and one login for remote desktop sessions, shell access, website proxying, and file access.
+Julgate is a self-hosted home-network gateway for browser-based RDP, VNC, SSH and file access. It uses Apache Guacamole and `guacd` for remote sessions while Julgate provides authentication, permissions, server management, workspaces, tabs and the PWA interface.
 
-It is designed to sit behind a reverse proxy such as Caddy and to run entirely in Docker. For RDP, VNC, and SSH it uses Apache Guacamole and `guacd` behind the scenes, while Matgate itself handles auth, permissions, tabs, file management, theme and language preferences, and local data storage.
+Julgate is a security-focused fork of Matgate. The application keeps the existing .NET 10, Minimal API and JSON-file architecture.
 
-## What Matgate gives you
-
-- Web-based RDP, VNC, and SSH sessions
-- File gateway for SFTP, FTP, and SMB
-- Website proxy mode for browser-based admin interfaces
-- Upload, download, delete, move, copy, archive extraction, and media preview in the file manager
-- Shareable Workspaces with public links, password protection, shared text, and file exchange
-- Live network tools for ping, lookup, port checking, and streamed download tests
-- Multiple open connections as draggable tabs
-- Session restore in the web UI
-- Local users stored in JSON files
-- Global servers and user-owned servers
-- Server folders for grouping, plus per-user favorites
-- Admin roles and per-server access control
-- English and German UI
-- Theme follows system settings by default, with per-user override
-- Clipboard integration and a status bar for the active tab
-- Server icons with protocol defaults and per-server overrides
-- GitHub Actions build for the Docker image
-- Installable PWA mode with desktop and home-screen app icons
-
-## Supported connection types
-
-| Type | What it is for |
-| --- | --- |
-| RDP | Remote Windows desktops through Guacamole |
-| VNC | Remote desktop access through Guacamole |
-| SSH | Remote shell access through Guacamole |
-| SFTP | File access through the Matgate file gateway |
-| FTP | File access through the Matgate file gateway |
-| SMB | File access through the Matgate file gateway |
-| Website (Beta) | Reverse-proxied browser access to internal web UIs |
-
-## How it works
+## Current release
 
 ```text
-Browser -> Matgate -> Guacamole / guacd -> RDP, VNC or SSH
-Browser -> Matgate -> File gateway backend -> SFTP / FTP / SMB
-Browser -> Matgate -> Website proxy -> Internal web UI
+0.6.1
+ghcr.io/juloc/julgate:0.6.1
 ```
 
-Matgate keeps the UI, permissions, and session state in one place. The client only talks to Matgate, which then talks to the remote systems in your network.
+Production Compose files use the fixed version tag by default. Override it with `JULGATE_VERSION` only when intentionally upgrading.
 
-## Quick start
+## Features
 
-1. Install Docker and Docker Compose.
-2. Create an optional `.env` file in the repository root.
-3. Start the local stack with Docker Compose. The default stack builds Matgate from `Matgate/Dockerfile` and does not need a separate `Caddyfile`.
-4. Open Matgate on port `8088`.
+- RDP, VNC and SSH in the browser
+- SFTP, FTP and SMB file access
+- global and user-owned connections
+- per-server permissions and administrator roles
+- multiple draggable connection tabs
+- workspaces with files and shared text
+- installable PWA
+- German and English interface
+- AE01-style Fluent interface
+- Docker and Dockhand deployment
 
-```powershell
-docker compose up --build -d
-```
+The website proxy, network tools and archive extraction are high-risk features and are disabled by default.
 
-Matgate is available at:
+## Architecture
 
 ```text
-http://localhost:8088
+Browser -> HTTPS reverse proxy -> Julgate edge
+                                -> Julgate application
+                                -> Apache Guacamole -> guacd -> RDP/VNC/SSH target
+                                -> file gateway -> SFTP/FTP/SMB target
 ```
 
-For a shareable stack, use one of:
+Only the edge service is published. Julgate, Guacamole and `guacd` remain unreachable from the host network. Julgate and `guacd` receive outbound network access only because they must contact configured targets.
 
-```powershell
+## Security defaults
+
+- no default administrator password
+- no fixed Guacamole signing key
+- AES-GCM encryption for saved target credentials
+- separate credential-encryption key
+- PBKDF2-SHA256 password hashing
+- secure and short-lived authentication cookies
+- login and global request rate limits
+- request-size and timeout limits
+- origin checks and browser security headers
+- remote certificate validation enabled by default
+- website proxy disabled by default
+- network tools disabled by default and administrator-only when enabled
+- archive extraction disabled by default
+- non-root Julgate container
+- read-only root filesystem
+- dropped Linux capabilities and `no-new-privileges`
+- separate frontend, backend and egress Docker networks
+
+Read [SECURITY.md](SECURITY.md) before deployment.
+
+## Required configuration
+
+Copy the example file:
+
+```bash
+cp .env.example .env
+```
+
+Generate secrets:
+
+```bash
+openssl rand -hex 16
+openssl rand -base64 32
+```
+
+Set at least:
+
+```env
+JULGATE_VERSION=0.6.1
+JULGATE_ADMIN_USER=admin
+JULGATE_ADMIN_PASSWORD=use-a-random-password-with-at-least-16-characters
+JULGATE_GUACAMOLE_JSON_SECRET_KEY=32-random-hex-characters
+JULGATE_CREDENTIAL_KEY=base64-encoded-32-byte-key
+```
+
+`JULGATE_CREDENTIAL_KEY` must be stored separately from the `/data` backup.
+
+## Published image deployment
+
+```bash
+docker compose -f docker-compose-simple.yaml pull
 docker compose -f docker-compose-simple.yaml up -d
 ```
 
-```powershell
-docker compose -f docker-compose-dockhand.yaml up -d
+The default image is:
+
+```text
+ghcr.io/juloc/julgate:0.6.1
 ```
 
-Both stacks include the reverse proxy and use a relative data folder, so your users, servers, and Guacamole config stay where you expect them.
+The workflow publishes these tags from `main`:
 
-> Important: if no admin credentials are set, Matgate creates `admin` / `change-me-now`. Change that before exposing the service anywhere beyond a trusted home network.
+- `0.6.1`
+- `latest`
+- `sha-<commit>`
 
-## PWA / App mode
+Use the fixed version or SHA tag for production.
 
-Matgate ships with a web app manifest, service worker, and app icons. On supported browsers you can install it to the desktop or home screen and launch it in a standalone app window.
+## Docker secrets overlay
 
-- On iPhone and iPad, use Safari's "Add to Home Screen"
-- On desktop browsers, use the install action from the browser menu
-- In installed mode, Matgate behaves much more like a normal app and keeps the browser chrome out of the way
+Create the local secret files:
 
-If you are behind HTTPS or using `localhost`, the install experience is usually best.
-
-## Recommended environment variables
-
-```env
-MATGATE_ADMIN_USER=admin
-MATGATE_ADMIN_PASSWORD=change-me-now
-MATGATE_GUACAMOLE_JSON_SECRET_KEY=0123456789abcdeffedcba9876543210
-MATGATE_DNS_SERVER=10.10.0.1
-MATGATE_DNS_SEARCH=example.home
-MATGATE_WORKSPACE_ROOT=/data/workspaces
+```bash
+mkdir -p secrets
+printf '%s' 'your-admin-password' > secrets/julgate_admin_password
+openssl rand -base64 32 > secrets/julgate_credential_key
+chmod 600 secrets/*
 ```
 
-| Variable | Purpose |
-| --- | --- |
-| `MATGATE_ADMIN_USER` | Initial admin username |
-| `MATGATE_ADMIN_PASSWORD` | Initial admin password |
-| `MATGATE_DATA_DIR` | Persistent data directory inside the container |
-| `MATGATE_GUACAMOLE_JSON_SECRET_KEY` | 32 hex characters used for Guacamole JSON auth |
-| `MATGATE_DNS_SERVER` | DNS server used inside Docker containers |
-| `MATGATE_DNS_SEARCH` | DNS search domain used inside Docker containers |
-| `MATGATE_WORKSPACE_ROOT` | Default filesystem root for workspace folders |
+Start with the overlay:
 
-`MATGATE_GUACAMOLE_JSON_SECRET_KEY` must be exactly 32 hex characters. Use your own random value.
-The Compose stack provides sane defaults, but you should override secrets and DNS settings for real use.
+```bash
+docker compose \
+  -f docker-compose-simple.yaml \
+  -f docker-compose-secrets.yaml \
+  up -d
+```
 
-## Data and persistence
+`JULGATE_GUACAMOLE_JSON_SECRET_KEY` remains an environment value because the upstream Guacamole image does not support Docker `*_FILE` variables.
 
-Matgate stores all persistent data under the configured data directory. In the default local compose setup that is the relative `./data` folder, mounted at `/data`.
+## Local build
 
-| Path | Purpose |
-| --- | --- |
-| `/data/users.json` | Local users, permissions, and favorites |
-| `/data/servers.json` | Global servers, user-owned servers, and folders |
-| `/data/workspaces.json` | Workspace definitions and share settings |
-| `data/guacamole.properties` | Guacamole runtime config |
-| `data/user-mapping.xml` | Guacamole user-to-connection mapping |
+The default stack builds the current checkout and tags the local image with `JULGATE_VERSION`:
 
-Back up the whole volume regularly. It contains the users, server definitions, and Guacamole sync files.
-
-## Permission model
-
-Matgate uses a small, explicit permission model:
-
-- `Admin` can manage users and all servers
-- `CanManageServers` can manage global servers
-- `CanCreateServers` can create own servers
-- `ServerAccessAll` gives access to all global servers
-- Users can also be granted access to individual global servers
-
-There are two server scopes:
-
-- `Global` for shared servers that admins can manage and grant access to
-- `Own` for servers owned by a specific user
-
-Own servers automatically belong to their owner. They are still visible to admins for oversight and support.
-
-## Reverse proxy and networking
-
-The included Compose stack exposes the app through Caddy on port `8088`.
-
-If you already run your own reverse proxy, forward it to the Matgate edge service or directly to the published host port.
-
-Inside Docker, Matgate can be pointed at your home DNS server so hostnames like `pc-terminal` or `nas` resolve correctly from the containers.
-
-## Development
-
-```powershell
-dotnet build Matgate.slnx
+```bash
 docker compose up --build -d
 ```
 
-The repository uses GitHub Actions to build and publish the Docker image on pushes and tags. The workflow also attaches a CI version suffix during image builds.
+Open:
 
-## Repository structure
+```text
+http://127.0.0.1:8088
+```
 
-| Path | Purpose |
-| --- | --- |
-| `Matgate/` | ASP.NET Core application |
-| `docker-compose.yml` | Full local stack with Caddy, Matgate, Guacamole, and guacd |
-| `docker-compose-simple.yaml` | Shareable local stack with Caddy, Matgate, Guacamole, and guacd |
-| `docker-compose-dockhand.yaml` | Copy/paste stack for Dockhand-based deployments |
-| `Matgate/Dockerfile` | Application container image |
-| `.github/workflows/` | CI and Docker image build workflow |
+For local HTTP testing:
 
-## Project status
+```env
+JULGATE_REQUIRE_SECURE_COOKIES=false
+```
 
-Matgate is an actively evolving self-hosted project. The current focus is on:
+For access through an HTTPS reverse proxy, set it to `true`.
 
-- stable remote sessions
-- file gateway workflows
-- user and server management
-- workspace polish
-- keeping the UI simple enough for everyday home-network use
-- making the website proxy mode more robust and integrated
+## Dockhand
 
-## Contributing
+Use `docker-compose-dockhand.yaml`. Configure the required environment values in Dockhand before deployment. The default host bind is `127.0.0.1:8088`, intended for an existing Caddy or another HTTPS reverse proxy.
 
-Issues and pull requests are welcome. If you are opening a PR, please include the context for the change and how you verified it.
+## Optional features
 
-## License
+```env
+JULGATE_ENABLE_WEBSITE_PROXY=false
+JULGATE_ENABLE_NETWORK_TOOLS=false
+JULGATE_ENABLE_ARCHIVE_EXTRACTION=false
+```
 
-Matgate is licensed under the MIT License. See [LICENSE](LICENSE).
+Do not enable these features unless required. The website proxy can reach internal web interfaces, network tools actively contact configured destinations, and archive extraction can consume significant disk and CPU resources.
+
+## Persistent data
+
+The `/data` volume contains:
+
+- `users.json`
+- `servers.json`
+- `workspaces.json`
+- encrypted stored credentials
+- ASP.NET Data Protection keys
+- workspace files
+- security audit logs
+
+The JSON files use atomic writes and private Unix permissions. Their `.bak` files contain the encrypted current state.
+
+## Existing Matgate data
+
+Before migration, create an offline backup. Copy the existing JSON and workspace data into the Julgate `/data` volume before first start.
+
+On first start, Julgate:
+
+1. reads the current JSON files;
+2. encrypts saved server and Guacamole bridge credentials;
+3. rewrites the files with private permissions;
+4. creates encrypted backup files;
+5. removes legacy plaintext Guacamole mapping files.
+
+Keep the configured `JULGATE_CREDENTIAL_KEY`; changing or losing it prevents decryption of stored credentials.
+
+## Development
+
+```bash
+dotnet restore Matgate.slnx
+dotnet build Matgate.slnx -c Release
+dotnet test Matgate.slnx -c Release
+```
+
+The internal project and namespace names still use `Matgate` temporarily to avoid a risky all-at-once code rename. Product-facing branding is Julgate.
+
+The implementation roadmap is in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md).
+
+## License and attribution
+
+Julgate remains licensed under the MIT License. It is based on Matgate by Real-TTX; the original copyright and license terms remain in the repository.

@@ -1,4 +1,3 @@
-using System.Xml.Linq;
 using Matgate.Models;
 
 namespace Matgate.Services;
@@ -9,31 +8,55 @@ public sealed class GuacamoleConfigWriter
     private readonly IConfiguration _configuration;
     private readonly ILogger<GuacamoleConfigWriter> _logger;
 
-    public GuacamoleConfigWriter(JsonDataStore store, IConfiguration configuration, ILogger<GuacamoleConfigWriter> logger)
+    public GuacamoleConfigWriter(
+        JsonDataStore store,
+        IConfiguration configuration,
+        ILogger<GuacamoleConfigWriter> logger)
     {
         _store = store;
         _configuration = configuration;
         _logger = logger;
     }
 
-    public async Task SynchronizeAsync(CancellationToken cancellationToken = default)
+    public Task SynchronizeAsync(CancellationToken cancellationToken = default)
     {
-        var users = await _store.GetUsersAsync(cancellationToken);
-        var servers = await _store.GetServersAsync(cancellationToken);
-        var enabledServers = servers
-            .Where(server => server.IsEnabled && ServerEndpoint.IsGuacamoleProtocol(server.Protocol))
-            .ToList();
+        cancellationToken.ThrowIfCancellationRequested();
 
-        var configHome = _store.DataDirectory;
-        Directory.CreateDirectory(configHome);
+        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            _store.DataDirectory,
+            Path.Combine(_store.DataDirectory, "guacamole")
+        };
 
-        await WritePropertiesAsync(configHome, cancellationToken);
-        await WriteUserMappingAsync(configHome, users, enabledServers, cancellationToken);
+        var configuredDirectory = Environment.GetEnvironmentVariable("JULGATE_GUACAMOLE_CONFIG_DIR")
+            ?? _configuration["Guacamole:ConfigDirectory"];
+        if (!string.IsNullOrWhiteSpace(configuredDirectory))
+        {
+            directories.Add(Path.GetFullPath(configuredDirectory));
+        }
 
-        _logger.LogInformation(
-            "Synchronized Guacamole config with {UserCount} user(s) and {ServerCount} server(s).",
-            users.Count,
-            enabledServers.Count);
+        var removed = 0;
+        foreach (var directory in directories)
+        {
+            removed += DeleteIfPresent(Path.Combine(directory, "user-mapping.xml"));
+            removed += DeleteIfPresent(Path.Combine(directory, "user-mapping.xml.tmp"));
+            removed += DeleteIfPresent(Path.Combine(directory, "guacamole.properties"));
+            removed += DeleteIfPresent(Path.Combine(directory, "guacamole.properties.tmp"));
+        }
+
+        if (removed > 0)
+        {
+            _logger.LogWarning(
+                "Removed {FileCount} legacy Guacamole file-auth configuration file(s). Julgate now supplies connection credentials only through short-lived encrypted JSON launch tokens.",
+                removed);
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Guacamole JSON authentication is active; no persistent plaintext connection mapping is written.");
+        }
+
+        return Task.CompletedTask;
     }
 
     public static string ConnectionName(ServerEndpoint server)
@@ -46,119 +69,23 @@ public sealed class GuacamoleConfigWriter
         return protocol.ToString().ToLowerInvariant();
     }
 
-    private async Task WritePropertiesAsync(string configHome, CancellationToken cancellationToken)
+    private static int DeleteIfPresent(string path)
     {
-        var guacdHost = _configuration["Guacamole:GuacdHost"]
-            ?? Environment.GetEnvironmentVariable("GUACD_HOSTNAME")
-            ?? "guacd";
-        var guacdPort = _configuration["Guacamole:GuacdPort"]
-            ?? Environment.GetEnvironmentVariable("GUACD_PORT")
-            ?? "4822";
-
-        var content = string.Join('\n',
-            $"guacd-hostname: {guacdHost}",
-            $"guacd-port: {guacdPort}",
-            "user-mapping: /etc/guacamole/user-mapping.xml",
-            "enable-websocket: true",
-            "");
-
-        await File.WriteAllTextAsync(Path.Combine(configHome, "guacamole.properties"), content, cancellationToken);
-    }
-
-    private static async Task WriteUserMappingAsync(
-        string configHome,
-        IReadOnlyList<MatgateUser> users,
-        IReadOnlyList<ServerEndpoint> servers,
-        CancellationToken cancellationToken)
-    {
-        var root = new XElement("user-mapping");
-
-        foreach (var user in users.Where(user => user.IsEnabled).OrderBy(user => user.UserName))
+        try
         {
-            var authorize = new XElement(
-                "authorize",
-                new XAttribute("username", user.UserName),
-                new XAttribute("password", user.GuacamolePassword));
-
-            var allowedServers = servers
-                .Where(server =>
-                    user.IsAdmin
-                    || server.OwnerUserId == user.Id
-                    || (server.OwnerUserId is null && (user.CanManageServers || user.ServerAccessAll || user.ServerAccess.Contains(server.Id))))
-                .OrderBy(server => server.Name);
-
-            foreach (var server in allowedServers)
+            if (!File.Exists(path))
             {
-                authorize.Add(BuildConnection(server));
+                return 0;
             }
 
-            root.Add(authorize);
+            File.Delete(path);
+            return 1;
         }
-
-        var document = new XDocument(new XDeclaration("1.0", "utf-8", null), root);
-        await File.WriteAllTextAsync(Path.Combine(configHome, "user-mapping.xml"), document.ToString(), cancellationToken);
-    }
-
-    private static XElement BuildConnection(ServerEndpoint server)
-    {
-        var connection = new XElement(
-            "connection",
-            new XAttribute("name", ConnectionName(server)),
-            new XElement("protocol", ProtocolName(server.Protocol)),
-            Param("hostname", server.Host),
-            Param("port", server.Port.ToString()));
-
-        if (server.Protocol is ServerProtocol.Rdp or ServerProtocol.Ssh
-            && !string.IsNullOrWhiteSpace(server.UserName))
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            connection.Add(Param("username", server.UserName));
+            throw new InvalidOperationException(
+                $"Legacy Guacamole credential file '{path}' could not be removed safely.",
+                exception);
         }
-
-        if (!string.IsNullOrWhiteSpace(server.Password))
-        {
-            connection.Add(Param("password", server.Password));
-        }
-
-        if (server.Protocol == ServerProtocol.Rdp)
-        {
-            if (!string.IsNullOrWhiteSpace(server.Domain))
-            {
-                connection.Add(Param("domain", server.Domain));
-            }
-
-            connection.Add(Param("security", "any"));
-            connection.Add(Param("ignore-cert", server.IgnoreCertificate ? "true" : "false"));
-            connection.Add(Param("server-layout", string.IsNullOrWhiteSpace(server.KeyboardLayout)
-                ? ServerEndpoint.DefaultKeyboardLayout
-                : server.KeyboardLayout.Trim()));
-            connection.Add(Param("resize-method", "reconnect"));
-            connection.Add(Param("enable-wallpaper", "false"));
-
-            // Report as "Matgate" instead of the default "Guacamole" client name.
-            connection.Add(Param("client-name", "Matgate"));
-
-            // Shared drive redirection for file transfer (drag & drop / upload in Matgate).
-            connection.Add(Param("enable-drive", "true"));
-            connection.Add(Param("drive-name", "Matgate"));
-            connection.Add(Param("create-drive-path", "true"));
-            connection.Add(Param("drive-path", $"/drive/{server.Id:N}"));
-        }
-        else if (server.Protocol == ServerProtocol.Vnc)
-        {
-            // Standard outbound VNC connections only need the shared target
-            // password and the common hostname / port parameters above.
-        }
-        else if (server.Protocol == ServerProtocol.Ssh)
-        {
-            connection.Add(Param("font-name", "monospace"));
-            connection.Add(Param("font-size", ServerEndpoint.NormalizeTerminalFontSize(server.TerminalFontSize).ToString()));
-        }
-
-        return connection;
-    }
-
-    private static XElement Param(string name, string value)
-    {
-        return new XElement("param", new XAttribute("name", name), value);
     }
 }
