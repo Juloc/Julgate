@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Primitives;
-
 namespace Matgate.Web;
 
 public sealed class PreferenceCookieCompatibilityMiddleware(RequestDelegate next)
@@ -63,7 +61,7 @@ public sealed class PreferenceCookieCompatibilityMiddleware(RequestDelegate next
 
             foreach (var addition in additions.Distinct(StringComparer.Ordinal))
             {
-                context.Response.Headers.Append(HeaderNames.SetCookie, new StringValues(addition));
+                context.Response.Headers.Append("Set-Cookie", addition);
             }
 
             return Task.CompletedTask;
