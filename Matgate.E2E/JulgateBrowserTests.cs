@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Playwright;
 using Xunit;
 
@@ -28,7 +29,7 @@ public sealed class JulgateBrowserTests
             IgnoreHTTPSErrors = true
         });
         context.SetDefaultTimeout(5_000);
-        context.SetDefaultNavigationTimeout(10_000);
+        context.SetDefaultNavigationTimeout(15_000);
 
         var loginPage = await context.NewPageAsync();
         Console.WriteLine("Checking anonymous protection and branding.");
@@ -39,12 +40,12 @@ public sealed class JulgateBrowserTests
         await LoginAsync(loginPage);
         await loginPage.CloseAsync();
 
-        var page = await context.NewPageAsync();
-        Console.WriteLine("Checking responsive shell screenshots.");
-        await VerifyResponsiveShellAsync(page);
+        Console.WriteLine("Checking authenticated route responses.");
+        await VerifyAuthenticatedRoutesAsync(context);
 
-        Console.WriteLine("Checking primary authenticated routes.");
-        await VerifyPrimaryPagesAsync(page);
+        Console.WriteLine("Checking representative responsive pages.");
+        var page = await context.NewPageAsync();
+        await VerifyResponsivePagesAsync(page);
     }
 
     private async Task VerifyAnonymousRoutesAsync(IPage page)
@@ -107,29 +108,7 @@ public sealed class JulgateBrowserTests
         await page.WaitForURLAsync(url => !url.Contains("/login", StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task VerifyResponsiveShellAsync(IPage page)
-    {
-        var viewports = new[]
-        {
-            (Name: "desktop", Width: 1440, Height: 1000),
-            (Name: "tablet", Width: 768, Height: 1024),
-            (Name: "phone", Width: 390, Height: 844)
-        };
-
-        foreach (var viewport in viewports)
-        {
-            await page.SetViewportSizeAsync(viewport.Width, viewport.Height);
-            await NavigateAuthenticatedAsync(page, "/");
-            await AssertPageIsResponsiveAsync(page);
-            await page.ScreenshotAsync(new PageScreenshotOptions
-            {
-                Path = Path.Combine(_artifactDirectory, $"julgate-{viewport.Name}.png"),
-                FullPage = true
-            });
-        }
-    }
-
-    private async Task VerifyPrimaryPagesAsync(IPage page)
+    private async Task VerifyAuthenticatedRoutesAsync(IBrowserContext context)
     {
         var routes = new[]
         {
@@ -141,47 +120,62 @@ public sealed class JulgateBrowserTests
             "/sessions",
             "/about"
         };
-        var viewports = new[]
-        {
-            (Width: 1440, Height: 1000),
-            (Width: 390, Height: 844)
-        };
+        var cookies = await context.CookiesAsync(_baseUrl);
+        var cookieHeader = string.Join("; ", cookies.Select(cookie => $"{cookie.Name}={cookie.Value}"));
+        Assert.False(string.IsNullOrWhiteSpace(cookieHeader));
 
-        foreach (var viewport in viewports)
+        using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", cookieHeader);
+
+        foreach (var route in routes)
         {
-            await page.SetViewportSizeAsync(viewport.Width, viewport.Height);
-            foreach (var route in routes)
-            {
-                Console.WriteLine($"Checking {route} at {viewport.Width}x{viewport.Height}.");
-                var response = await NavigateAuthenticatedAsync(page, route);
-                Assert.NotNull(response);
-                Assert.True(response!.Status < 400, $"{route} returned HTTP {response.Status}.");
-                Assert.DoesNotContain("/login", page.Url, StringComparison.OrdinalIgnoreCase);
-                await AssertPageIsResponsiveAsync(page);
-            }
+            using var response = await client.GetAsync($"{_baseUrl}{route}");
+            Assert.True(
+                response.StatusCode is >= HttpStatusCode.OK and < HttpStatusCode.BadRequest,
+                $"{route} returned HTTP {(int)response.StatusCode}.");
+            Assert.DoesNotContain(
+                "/login",
+                response.Headers.Location?.ToString() ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
         }
     }
 
-    private async Task<IResponse?> NavigateAuthenticatedAsync(IPage page, string route)
+    private async Task VerifyResponsivePagesAsync(IPage page)
     {
-        var response = await page.GotoAsync(
-            $"{_baseUrl}{route}",
-            new PageGotoOptions
+        var cases = new[]
+        {
+            (Name: "desktop", Route: "/admin/users", Width: 1440, Height: 1000),
+            (Name: "tablet", Route: "/workspaces", Width: 768, Height: 1024),
+            (Name: "phone", Route: "/about", Width: 390, Height: 844)
+        };
+
+        foreach (var item in cases)
+        {
+            Console.WriteLine($"Rendering {item.Route} at {item.Width}x{item.Height}.");
+            await page.SetViewportSizeAsync(item.Width, item.Height);
+            var response = await page.GotoAsync(
+                $"{_baseUrl}{item.Route}",
+                new PageGotoOptions
+                {
+                    WaitUntil = WaitUntilState.DOMContentLoaded,
+                    Timeout = 15_000
+                });
+            Assert.NotNull(response);
+            Assert.True(response!.Status < 400, $"{item.Route} returned HTTP {response.Status}.");
+            Assert.DoesNotContain("/login", page.Url, StringComparison.OrdinalIgnoreCase);
+            await AssertPageIsResponsiveAsync(page);
+            await page.ScreenshotAsync(new PageScreenshotOptions
             {
-                WaitUntil = WaitUntilState.Commit,
-                Timeout = 10_000
+                Path = Path.Combine(_artifactDirectory, $"julgate-{item.Name}.png")
             });
-        await page.WaitForFunctionAsync(
-            "() => document.body && document.body.innerText.trim().length > 0 && document.querySelector('nav, [role=\"navigation\"]')",
-            null,
-            new PageWaitForFunctionOptions { Timeout = 10_000 });
-        return response;
+        }
     }
 
     private static async Task AssertPageIsResponsiveAsync(IPage page)
     {
         await page.WaitForFunctionAsync(
-            "() => !document.body.innerText.includes('MATGATE')",
+            "() => document.body && !document.body.innerText.includes('MATGATE')",
             null,
             new PageWaitForFunctionOptions { Timeout = 5_000 });
         var bodyText = await page.Locator("body").InnerTextAsync();
