@@ -88,22 +88,11 @@ public sealed class JulgateBrowserTests : IAsyncLifetime
     [InlineData("phone", 390, 844)]
     public async Task AuthenticatedShellWorksWithoutHorizontalOverflow(string name, int width, int height)
     {
-        await using var context = await _browser.NewContextAsync(new BrowserNewContextOptions
-        {
-            ViewportSize = new ViewportSize { Width = width, Height = height },
-            IgnoreHTTPSErrors = true
-        });
+        await using var context = await NewContextAsync(width, height);
         var page = await context.NewPageAsync();
-        await page.GotoAsync($"{_baseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
-        await page.FillAsync("input[name=username]", _adminUser);
-        await page.FillAsync("input[name=password]", _adminPassword);
-        await page.ClickAsync("button[type=submit]");
-        await page.WaitForURLAsync(url => !url.Contains("/login", StringComparison.OrdinalIgnoreCase));
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await LoginAsync(page);
 
-        var bodyText = await page.Locator("body").InnerTextAsync();
-        Assert.Contains("Julgate", bodyText, StringComparison.OrdinalIgnoreCase);
-        Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= window.innerWidth + 1"));
+        await AssertPageIsResponsiveAsync(page);
         Assert.True(await page.Locator("nav, [role=navigation]").CountAsync() > 0);
 
         await page.ScreenshotAsync(new PageScreenshotOptions
@@ -111,5 +100,63 @@ public sealed class JulgateBrowserTests : IAsyncLifetime
             Path = Path.Combine(_artifactDirectory, $"julgate-{name}.png"),
             FullPage = true
         });
+    }
+
+    [Theory]
+    [InlineData("/", 1440, 1000)]
+    [InlineData("/admin/users", 1440, 1000)]
+    [InlineData("/admin/servers", 1440, 1000)]
+    [InlineData("/account", 1440, 1000)]
+    [InlineData("/workspaces", 1440, 1000)]
+    [InlineData("/sessions", 1440, 1000)]
+    [InlineData("/about", 1440, 1000)]
+    [InlineData("/", 390, 844)]
+    [InlineData("/admin/users", 390, 844)]
+    [InlineData("/admin/servers", 390, 844)]
+    [InlineData("/account", 390, 844)]
+    [InlineData("/workspaces", 390, 844)]
+    [InlineData("/sessions", 390, 844)]
+    [InlineData("/about", 390, 844)]
+    public async Task PrimaryPagesRenderOnDesktopAndPhone(string route, int width, int height)
+    {
+        await using var context = await NewContextAsync(width, height);
+        var page = await context.NewPageAsync();
+        await LoginAsync(page);
+
+        var response = await page.GotoAsync($"{_baseUrl}{route}", new PageGotoOptions
+        {
+            WaitUntil = WaitUntilState.NetworkIdle
+        });
+
+        Assert.NotNull(response);
+        Assert.True(response!.Status < 400, $"{route} returned HTTP {response.Status}.");
+        await AssertPageIsResponsiveAsync(page);
+    }
+
+    private Task<IBrowserContext> NewContextAsync(int width, int height)
+    {
+        return _browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize { Width = width, Height = height },
+            IgnoreHTTPSErrors = true
+        });
+    }
+
+    private async Task LoginAsync(IPage page)
+    {
+        await page.GotoAsync($"{_baseUrl}/login", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.FillAsync("input[name=username]", _adminUser);
+        await page.FillAsync("input[name=password]", _adminPassword);
+        await page.ClickAsync("button[type=submit]");
+        await page.WaitForURLAsync($"{_baseUrl}/");
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+    }
+
+    private static async Task AssertPageIsResponsiveAsync(IPage page)
+    {
+        var bodyText = await page.Locator("body").InnerTextAsync();
+        Assert.Contains("Julgate", bodyText, StringComparison.OrdinalIgnoreCase);
+        Assert.True(await page.EvaluateAsync<bool>(
+            "() => document.documentElement.scrollWidth <= window.innerWidth + 1"));
     }
 }
