@@ -165,10 +165,19 @@ public sealed class GuacamoleLauncher
         return Convert.ToBase64String(Encoding.UTF8.GetBytes($"{connectionName}\0c\0json"));
     }
 
+    // The example key shipped with guacamole-auth-json (and older Matgate defaults). It is public,
+    // so a token signed with it is forgeable by anyone — refuse it outright.
+    private const string KnownPublicSecret = "0123456789abcdeffedcba9876543210";
+
     private static bool TryReadHexKey(string? value, out byte[] key)
     {
         key = [];
         if (string.IsNullOrWhiteSpace(value) || value.Length != 32)
+        {
+            return false;
+        }
+
+        if (string.Equals(value.Trim(), KnownPublicSecret, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

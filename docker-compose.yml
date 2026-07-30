@@ -44,7 +44,7 @@ services:
       MATGATE_DATA_DIR: /data
       MATGATE_ADMIN_USER: ${MATGATE_ADMIN_USER:-admin}
       MATGATE_ADMIN_PASSWORD: ${MATGATE_ADMIN_PASSWORD:-change-me-now}
-      Guacamole__JsonSecretKey: ${MATGATE_GUACAMOLE_JSON_SECRET_KEY:-0123456789abcdeffedcba9876543210}
+      Guacamole__JsonSecretKey: ${MATGATE_GUACAMOLE_JSON_SECRET_KEY:?Set a strong 32-hex secret in .env (openssl rand -hex 16); the old public default is refused}
       Guacamole__PublicBasePath: /guacamole
       Guacamole__DirectLaunch: "true"
     volumes:
@@ -69,7 +69,7 @@ services:
       GUACD_HOSTNAME: guacd
       GUACD_PORT: "4822"
       JSON_ENABLED: "true"
-      JSON_SECRET_KEY: ${MATGATE_GUACAMOLE_JSON_SECRET_KEY:-0123456789abcdeffedcba9876543210}
+      JSON_SECRET_KEY: ${MATGATE_GUACAMOLE_JSON_SECRET_KEY:?Set a strong 32-hex secret in .env (openssl rand -hex 16); the old public default is refused}
     volumes:
       - ./data:/etc/guacamole
     restart: unless-stopped

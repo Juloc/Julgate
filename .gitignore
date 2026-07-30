@@ -3,3 +3,6 @@
 data/
 .vs/
 .vscode/
+.env
+.env.*
+!.env.example

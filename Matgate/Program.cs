@@ -2,8 +2,11 @@ using Matgate.Services;
 using Matgate.Web;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using System.Text;
+using System.Threading.RateLimiting;
 
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 var builder = WebApplication.CreateBuilder(args);
@@ -17,11 +20,26 @@ Directory.CreateDirectory(keyDirectory);
 
 builder.WebHost.ConfigureKestrel(options =>
 {
+    // Uploads/file transfers may be large, so the body size stays uncapped; but keep a lenient
+    // minimum data rate so a trickle of bytes can't hold a connection open indefinitely (slowloris).
     options.Limits.MaxRequestBodySize = null;
-    options.Limits.MinRequestBodyDataRate = null;
+    options.Limits.MinRequestBodyDataRate = new MinDataRate(bytesPerSecond: 80, gracePeriod: TimeSpan.FromSeconds(20));
     options.Limits.RequestHeadersTimeout = TimeSpan.FromMinutes(2);
     options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(15);
 });
+
+// Matgate is only reachable through the edge reverse proxy (caddy), so honor its forwarded
+// scheme/client-IP: this makes Request.IsHttps correct behind TLS termination (so the auth cookie
+// becomes Secure automatically) and lets rate limiting key on the real client address.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+var requireHttps = string.Equals(
+    Environment.GetEnvironmentVariable("MATGATE_REQUIRE_HTTPS"), "true", StringComparison.OrdinalIgnoreCase);
 
 builder.Services
     .Configure<FormOptions>(options =>
@@ -35,7 +53,9 @@ builder.Services
         options.Cookie.Name = "Matgate.Auth";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        // Behind TLS the forwarded scheme makes this Secure automatically; set MATGATE_REQUIRE_HTTPS=true
+        // to force Secure-only (recommended once TLS is terminated at the edge).
+        options.Cookie.SecurePolicy = requireHttps ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
         options.ExpireTimeSpan = TimeSpan.FromDays(30);
         options.SlidingExpiration = true;
         options.LoginPath = "/login";
@@ -46,6 +66,22 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(keyDirectory))
     .SetApplicationName("Matgate");
 builder.Services.AddAuthorization();
+
+// Throttle login attempts per client IP to blunt password brute-forcing.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("login", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(5),
+                QueueLimit = 0
+            }));
+});
+
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<JsonDataStore>();
 builder.Services.AddSingleton<GuacamoleConfigWriter>();
@@ -58,7 +94,14 @@ builder.Services.AddSingleton<WebsiteProxyService>();
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
+if (requireHttps)
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
 app.UseWebSockets();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 

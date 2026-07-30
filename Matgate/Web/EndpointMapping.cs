@@ -273,7 +273,7 @@ public static class EndpointMapping
                 : Results.Content(views.Login(context), "text/html");
         });
 
-        app.MapPost("/login", SignInAsync);
+        app.MapPost("/login", SignInAsync).RequireRateLimiting("login");
         app.MapPost("/logout", SignOutAsync).RequireAuthorization();
         app.MapGet("/", HomeAsync).RequireAuthorization();
         app.MapGet("/forbidden", ForbiddenAsync).RequireAuthorization();
@@ -724,7 +724,10 @@ public static class EndpointMapping
         {
             Name = name,
             Description = Clean(form["description"].ToString(), ""),
-            RootPath = Clean(form["rootPath"].ToString(), ""),
+            // A free-form RootPath can point the workspace (and its shared note) at any path on the
+            // host, so only global admins may set it; everyone else gets the managed per-workspace
+            // directory under WorkspaceRootDirectory.
+            RootPath = user.IsAdmin ? Clean(form["rootPath"].ToString(), "") : "",
             SharedNoteFileName = Clean(form["sharedNoteFileName"].ToString(), "shared-note.md"),
             AllowUploads = IsChecked(form, "allowUploads"),
             AllowTextExchange = IsChecked(form, "allowTextExchange"),
@@ -845,7 +848,12 @@ public static class EndpointMapping
 
             stored.Name = name;
             stored.Description = Clean(form["description"].ToString(), "");
-            stored.RootPath = Clean(form["rootPath"].ToString(), "");
+            // Only global admins may (re)point RootPath at an arbitrary host path; for everyone else
+            // keep the existing/managed path so a non-admin can't escape the workspace directory.
+            if (user.IsAdmin)
+            {
+                stored.RootPath = Clean(form["rootPath"].ToString(), "");
+            }
             stored.SharedNoteFileName = Clean(form["sharedNoteFileName"].ToString(), "shared-note.md");
             stored.AllowUploads = IsChecked(form, "allowUploads");
             stored.AllowTextExchange = IsChecked(form, "allowTextExchange");
@@ -1529,6 +1537,11 @@ public static class EndpointMapping
         if (access.Result is not null)
         {
             return access.Result;
+        }
+
+        if (access.Expired)
+        {
+            return Results.Content(views.WorkspaceExpired(context, access.Workspace!, access.PublicUrl), "text/html");
         }
 
         if (access.PasswordRequired)
@@ -2528,7 +2541,8 @@ public static class EndpointMapping
 
     private static async Task<IResult> ToolsAsync(HttpContext context, JsonDataStore store, HtmlViews views)
     {
-        var user = await RequireUserAsync(context, store);
+        // Diagnostics page is admin-only (its actions are an internal scanner / server-side fetcher).
+        var user = await RequireAdminAsync(context, store);
         if (user is null)
         {
             return Results.Redirect("/login");
@@ -2542,7 +2556,7 @@ public static class EndpointMapping
         JsonDataStore store,
         NetworkToolsService tools)
     {
-        var user = await RequireUserAsync(context, store);
+        var user = await RequireAdminAsync(context, store);
         if (user is null)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -2572,7 +2586,8 @@ public static class EndpointMapping
         JsonDataStore store,
         NetworkToolsService tools)
     {
-        var user = await RequireUserAsync(context, store);
+        // Network diagnostics are a host/port scanner + server-side fetcher (SSRF surface); admin-only.
+        var user = await RequireAdminAsync(context, store);
         if (user is null)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -2596,7 +2611,7 @@ public static class EndpointMapping
         JsonDataStore store,
         NetworkToolsService tools)
     {
-        var user = await RequireUserAsync(context, store);
+        var user = await RequireAdminAsync(context, store);
         if (user is null)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -2625,7 +2640,7 @@ public static class EndpointMapping
         JsonDataStore store,
         NetworkToolsService tools)
     {
-        var user = await RequireUserAsync(context, store);
+        var user = await RequireAdminAsync(context, store);
         if (user is null)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;

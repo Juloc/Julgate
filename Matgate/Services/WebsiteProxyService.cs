@@ -2225,6 +2225,16 @@ public sealed class WebsiteProxyService
                 ? BaseUri
                 : new Uri(BaseUri, relativePath);
 
+            // A scheme-qualified catch-all path (e.g. .../proxy/https://other-host/) makes Uri
+            // resolution jump to a different authority -> SSRF. Pin the proxy to the configured origin.
+            if (!string.Equals(
+                    target.GetLeftPart(UriPartial.Authority),
+                    BaseUri.GetLeftPart(UriPartial.Authority),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                target = BaseUri;
+            }
+
             if (!queryString.HasValue)
             {
                 return target;
