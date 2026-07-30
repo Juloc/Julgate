@@ -1,4 +1,4 @@
-name: Verify published Julgate 0.7.0
+name: Publish and verify Julgate 0.7.0
 
 on:
   pull_request:
@@ -8,15 +8,23 @@ on:
 
 permissions:
   contents: read
-  packages: read
+  packages: write
 
 jobs:
-  verify-image:
-    name: Pull and start ghcr.io/juloc/julgate:0.7.0
+  publish-and-verify:
+    name: Publish merged main and verify ghcr.io/juloc/julgate:0.7.0
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
+      - name: Checkout merged main commit
+        uses: actions/checkout@v6
+        with:
+          ref: f326e16c9236035a3e5588a36a44f5d2d1d3f489
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -24,7 +32,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull immutable image
+      - name: Build and publish merged image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Matgate/Dockerfile
+          push: true
+          build-args: |
+            JULGATE_VERSION=0.7.0
+            JULGATE_BUILD_TAG=github
+            JULGATE_BUILD_TIME=2026-07-30T19:43:00Z
+          tags: |
+            ghcr.io/juloc/julgate:0.7.0
+            ghcr.io/juloc/julgate:latest
+            ghcr.io/juloc/julgate:sha-f326e16
+          labels: |
+            org.opencontainers.image.title=Julgate
+            org.opencontainers.image.version=0.7.0
+            org.opencontainers.image.revision=f326e16c9236035a3e5588a36a44f5d2d1d3f489
+            org.opencontainers.image.source=https://github.com/Juloc/Julgate
+          provenance: mode=max
+          sbom: true
+
+      - name: Pull immutable image from registry
         run: docker pull ghcr.io/juloc/julgate:0.7.0
 
       - name: Verify image metadata
@@ -33,10 +63,10 @@ jobs:
           set -euo pipefail
           image=ghcr.io/juloc/julgate:0.7.0
           test "$(docker image inspect "$image" --format '{{.Config.User}}')" != ""
-          version="$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')"
-          test "$version" = "0.7.0"
+          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')" = "0.7.0"
+          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "f326e16c9236035a3e5588a36a44f5d2d1d3f489"
 
-      - name: Start and smoke test image
+      - name: Start and smoke test published image
         shell: bash
         run: |
           set -euo pipefail
