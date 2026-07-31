@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Xml.Linq;
 using Matgate.Models;
 
@@ -73,92 +75,26 @@ public sealed class GuacamoleConfigWriter
     {
         var root = new XElement("user-mapping");
 
+        // Connections are launched via self-contained JSON-auth tokens (GuacamoleLauncher), so the
+        // file-auth provider is only a formality here. We deliberately do NOT write device hostnames,
+        // usernames or passwords into this file (that was a second cleartext copy of every credential);
+        // and the per-user login secret is stored hashed, not in cleartext.
         foreach (var user in users.Where(user => user.IsEnabled).OrderBy(user => user.UserName))
         {
-            var authorize = new XElement(
+            root.Add(new XElement(
                 "authorize",
                 new XAttribute("username", user.UserName),
-                new XAttribute("password", user.GuacamolePassword));
-
-            var allowedServers = servers
-                .Where(server =>
-                    user.IsAdmin
-                    || server.OwnerUserId == user.Id
-                    || (server.OwnerUserId is null && (user.CanManageServers || user.ServerAccessAll || user.ServerAccess.Contains(server.Id))))
-                .OrderBy(server => server.Name);
-
-            foreach (var server in allowedServers)
-            {
-                authorize.Add(BuildConnection(server));
-            }
-
-            root.Add(authorize);
+                new XAttribute("password", Sha256Hex(user.GuacamolePassword)),
+                new XAttribute("encoding", "sha256")));
         }
 
         var document = new XDocument(new XDeclaration("1.0", "utf-8", null), root);
         await File.WriteAllTextAsync(Path.Combine(configHome, "user-mapping.xml"), document.ToString(), cancellationToken);
     }
 
-    private static XElement BuildConnection(ServerEndpoint server)
+    private static string Sha256Hex(string? value)
     {
-        var connection = new XElement(
-            "connection",
-            new XAttribute("name", ConnectionName(server)),
-            new XElement("protocol", ProtocolName(server.Protocol)),
-            Param("hostname", server.Host),
-            Param("port", server.Port.ToString()));
-
-        if (server.Protocol is ServerProtocol.Rdp or ServerProtocol.Ssh
-            && !string.IsNullOrWhiteSpace(server.UserName))
-        {
-            connection.Add(Param("username", server.UserName));
-        }
-
-        if (!string.IsNullOrWhiteSpace(server.Password))
-        {
-            connection.Add(Param("password", server.Password));
-        }
-
-        if (server.Protocol == ServerProtocol.Rdp)
-        {
-            if (!string.IsNullOrWhiteSpace(server.Domain))
-            {
-                connection.Add(Param("domain", server.Domain));
-            }
-
-            connection.Add(Param("security", "any"));
-            connection.Add(Param("ignore-cert", server.IgnoreCertificate ? "true" : "false"));
-            connection.Add(Param("server-layout", string.IsNullOrWhiteSpace(server.KeyboardLayout)
-                ? ServerEndpoint.DefaultKeyboardLayout
-                : server.KeyboardLayout.Trim()));
-            connection.Add(Param("resize-method", "reconnect"));
-            connection.Add(Param("enable-wallpaper", "false"));
-
-            // Report as "Matgate" instead of the default "Guacamole" client name.
-            connection.Add(Param("client-name", "Matgate"));
-
-            // Shared drive redirection for file transfer (drag & drop / upload in Matgate).
-            connection.Add(Param("enable-drive", "true"));
-            connection.Add(Param("drive-name", "Matgate"));
-            connection.Add(Param("create-drive-path", "true"));
-            connection.Add(Param("drive-path", $"/drive/{server.Id:N}"));
-        }
-        else if (server.Protocol == ServerProtocol.Vnc)
-        {
-            // Standard outbound VNC connections only need the shared target
-            // password and the common hostname / port parameters above.
-        }
-        else if (server.Protocol == ServerProtocol.Ssh)
-        {
-            connection.Add(Param("font-name", "monospace"));
-            connection.Add(Param("font-size", ServerEndpoint.NormalizeTerminalFontSize(server.TerminalFontSize).ToString()));
-        }
-
-        return connection;
-    }
-
-    private static XElement Param(string name, string value)
-    {
-        return new XElement("param", new XAttribute("name", name), value);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value ?? ""));
+        return Convert.ToHexString(hash);
     }
 }

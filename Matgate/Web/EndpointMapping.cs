@@ -275,6 +275,14 @@ public static class EndpointMapping
 
         app.MapPost("/login", SignInAsync).RequireRateLimiting("login");
         app.MapPost("/logout", SignOutAsync).RequireAuthorization();
+
+        // Cookie-only auth probe for the edge proxy's forward_auth on /guacamole* (returns 200/401,
+        // never a redirect) so the Guacamole webapp is only reachable by a signed-in Matgate user.
+        app.MapMethods("/internal/guac-authz", new[] { "GET", "HEAD" }, async (HttpContext context, JsonDataStore store) =>
+        {
+            var user = await CurrentUserAsync(context, store);
+            return user is null ? Results.Unauthorized() : Results.Ok();
+        });
         app.MapGet("/", HomeAsync).RequireAuthorization();
         app.MapGet("/forbidden", ForbiddenAsync).RequireAuthorization();
         app.MapGet("/connect/{id:guid}", ConnectAsync).RequireAuthorization();

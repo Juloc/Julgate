@@ -12,10 +12,12 @@ public sealed class JsonDataStore
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ILogger<JsonDataStore> _logger;
+    private readonly SecretProtector _protector;
 
-    public JsonDataStore(IConfiguration configuration, IHostEnvironment environment, ILogger<JsonDataStore> logger)
+    public JsonDataStore(IConfiguration configuration, IHostEnvironment environment, ILogger<JsonDataStore> logger, SecretProtector protector)
     {
         _logger = logger;
+        _protector = protector;
 
         var configured = Environment.GetEnvironmentVariable("MATGATE_DATA_DIR")
             ?? configuration["Matgate:DataDirectory"];
@@ -61,7 +63,12 @@ public sealed class JsonDataStore
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            return await ReadListAsync<ServerEndpoint>(ServersPath, cancellationToken);
+            var servers = await ReadListAsync<ServerEndpoint>(ServersPath, cancellationToken);
+            foreach (var server in servers)
+            {
+                server.Password = _protector.Unprotect(server.Password);
+            }
+            return servers;
         }
         finally
         {
@@ -152,7 +159,15 @@ public sealed class JsonDataStore
         try
         {
             var servers = await ReadListAsync<ServerEndpoint>(ServersPath, cancellationToken);
+            foreach (var server in servers)
+            {
+                server.Password = _protector.Unprotect(server.Password);
+            }
             update(servers);
+            foreach (var server in servers)
+            {
+                server.Password = _protector.Protect(server.Password);
+            }
             await WriteListAsync(ServersPath, servers, cancellationToken);
         }
         finally
@@ -233,6 +248,49 @@ public sealed class JsonDataStore
         if (changed)
         {
             _logger.LogInformation("Generated missing Guacamole bridge passwords for existing users.");
+        }
+    }
+
+    public async Task MigrateServerSecretsAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_protector.IsEnabled)
+        {
+            return;
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var servers = await ReadListAsync<ServerEndpoint>(ServersPath, cancellationToken);
+            var plaintextPresent = servers.Any(server =>
+                !string.IsNullOrEmpty(server.Password) && !_protector.IsProtected(server.Password));
+            if (!plaintextPresent)
+            {
+                return;
+            }
+
+            // One-time safety backup before rewriting real credentials.
+            var backupPath = ServersPath + ".plaintext.bak";
+            if (File.Exists(ServersPath) && !File.Exists(backupPath))
+            {
+                File.Copy(ServersPath, backupPath);
+            }
+
+            foreach (var server in servers)
+            {
+                server.Password = _protector.Protect(server.Password);
+            }
+
+            await WriteListAsync(ServersPath, servers, cancellationToken);
+            _logger.LogWarning(
+                "Encrypted {Count} stored server credential(s) at rest. A one-time plaintext backup was "
+                + "written to '{Backup}' - move it off the host or delete it once the app is confirmed working.",
+                servers.Count,
+                backupPath);
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
