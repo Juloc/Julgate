@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.6 — 2026-07-31
+
+### Interface
+
+- Keep the SMB/SFTP/FTP file viewer close action inside its dialog instead of allowing the event to reach the connection-tab or browser navigation handlers.
+- Add a Playwright regression test proving that closing an embedded file viewer leaves the Julgate page and active connection tab open.
+
+### Reliability
+
+- Separate login, state-changing and read request limits so normal interactive tabs cannot exhaust a single IP-wide request bucket.
+- Partition authenticated traffic per user and include a `Retry-After` response for genuine throttling.
+
+### Upstream
+
+- Review the four commits added to `Real-TTX/Matgate` after the Julgate fork point.
+- Keep Julgate security, credential and deployment implementations instead of replacing them with overlapping upstream changes.
+- Track missing upstream UI features for selective porting rather than blind full-tree merges.
+
 ## 0.7.0 — 2026-07-30
 
 ### Security
