@@ -5,6 +5,7 @@ namespace Matgate.Web;
 public sealed class Ae01ThemeMiddleware(RequestDelegate next)
 {
     private const string StylesheetMarkup = "<link rel=\"stylesheet\" href=\"/assets/julgate-ae01.css\">";
+    private const string ShellEnhancementMarkup = "<script src=\"/assets/julgate-shell-enhancements.js\" defer></script>";
     private const string StorageMigrationScript = """
         <script id="julgate-storage-migration">
         (() => {
@@ -136,6 +137,14 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
                     outputText = outputText.Replace(
                         "</head>",
                         $"{StylesheetMarkup}</head>",
+                        StringComparison.OrdinalIgnoreCase);
+                }
+
+                if (!outputText.Contains("/assets/julgate-shell-enhancements.js", StringComparison.OrdinalIgnoreCase))
+                {
+                    outputText = outputText.Replace(
+                        "</head>",
+                        $"{ShellEnhancementMarkup}</head>",
                         StringComparison.OrdinalIgnoreCase);
                 }
             }
