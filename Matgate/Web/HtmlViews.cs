@@ -684,6 +684,12 @@ public sealed class HtmlViews
                     <td class="table-actions">{{FavoriteToggleForm(context, user, server, "/account")}}</td>
                 </tr>
                 """));
+        var tab = context.Request.Query["tab"].ToString().ToLowerInvariant();
+        if (tab is not ("security" or "favorites"))
+        {
+            tab = "profile";
+        }
+        var de = Language(context) == "de";
         var body = $$"""
             <section class="page-head">
                 <div>
@@ -691,49 +697,75 @@ public sealed class HtmlViews
                     <h1>{{E(displayName)}}</h1>
                 </div>
             </section>
-            <section class="panel">
-                <h2>{{T(context, "Profile")}}</h2>
-                <form method="post" action="/account" class="form-grid">
-                    {{Csrf(context)}}
-                    <label>{{T(context, "Display name")}}
-                        <input name="displayName" value="{{A(user.DisplayName)}}">
-                    </label>
-                    <label>{{T(context, "Preferred language")}}
-                        <select name="preferredLanguage">
-                            {{LanguageOptions(context, user.PreferredLanguage)}}
-                        </select>
-                    </label>
-                    <label>{{T(context, "Preferred theme")}}
-                        <select name="preferredTheme">
-                            {{ThemeOptions(context, user.PreferredTheme)}}
-                        </select>
-                    </label>
-                    <div class="actions"><button type="submit" class="primary">{{Icon("save")}}{{T(context, "Save")}}</button></div>
-                </form>
-            </section>
-            <section class="panel">
-                <h2>{{T(context, "Favorite servers")}}</h2>
-                <p class="muted">{{T(context, "Favorites are stored per user.")}}</p>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>{{T(context, "Name")}}</th>
-                                <th>{{T(context, "Folder")}}</th>
-                                <th>{{T(context, "Type")}}</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>{{favoriteRows}}</tbody>
-                    </table>
+            <section class="tabs" data-tabs>
+                <div class="tab-strip" role="tablist">
+                    <a class="tab-button{{(tab == "profile" ? " active" : "")}}" href="?tab=profile" data-tab-target="profile" role="tab" aria-selected="{{(tab == "profile" ? "true" : "false")}}">{{Icon("user")}}<span>{{(de ? "Profil" : "Profile")}}</span></a>
+                    <a class="tab-button{{(tab == "security" ? " active" : "")}}" href="?tab=security" data-tab-target="security" role="tab" aria-selected="{{(tab == "security" ? "true" : "false")}}">{{Icon("key")}}<span>{{(de ? "Sicherheit" : "Security")}}</span></a>
+                    <a class="tab-button{{(tab == "favorites" ? " active" : "")}}" href="?tab=favorites" data-tab-target="favorites" role="tab" aria-selected="{{(tab == "favorites" ? "true" : "false")}}">{{Icon("star")}}<span>{{(de ? "Favoriten" : "Favorites")}}</span></a>
+                </div>
+                <div class="tab-panels">
+                    <div class="tab-panel{{(tab == "profile" ? "" : " hidden")}}" data-tab-panel="profile">
+                        <section class="panel">
+                            <h2>{{(de ? "Profil" : "Profile")}}</h2>
+                            <form method="post" action="/account" class="form-grid">
+                                {{Csrf(context)}}
+                                <label>{{T(context, "Display name")}}
+                                    <input name="displayName" value="{{A(user.DisplayName)}}">
+                                </label>
+                                <label>{{T(context, "Preferred language")}}
+                                    <select name="preferredLanguage">
+                                        {{LanguageOptions(context, user.PreferredLanguage)}}
+                                    </select>
+                                </label>
+                                <label>{{T(context, "Preferred theme")}}
+                                    <select name="preferredTheme">
+                                        {{ThemeOptions(context, user.PreferredTheme)}}
+                                    </select>
+                                </label>
+                                <div class="actions"><button type="submit" class="primary">{{Icon("save")}}{{T(context, "Save")}}</button></div>
+                            </form>
+                        </section>
+                    </div>
+                    <div class="tab-panel{{(tab == "security" ? "" : " hidden")}}" data-tab-panel="security">
+                        <section class="panel">
+                            <h2>{{(de ? "Passwort aendern" : "Change password")}}</h2>
+                            <p class="muted">{{(de ? "Mindestens 8 Zeichen." : "At least 8 characters.")}}</p>
+                            <form method="post" action="/account/password" class="form-grid">
+                                {{Csrf(context)}}
+                                <label>{{(de ? "Aktuelles Passwort" : "Current password")}}
+                                    <input type="password" name="currentPassword" autocomplete="current-password" required>
+                                </label>
+                                <label>{{(de ? "Neues Passwort" : "New password")}}
+                                    <input type="password" name="newPassword" autocomplete="new-password" minlength="8" required>
+                                </label>
+                                <label>{{(de ? "Neues Passwort bestaetigen" : "Confirm new password")}}
+                                    <input type="password" name="confirmPassword" autocomplete="new-password" minlength="8" required>
+                                </label>
+                                <div class="actions"><button type="submit" class="primary">{{Icon("key")}}{{(de ? "Passwort aendern" : "Change password")}}</button></div>
+                            </form>
+                        </section>
+                    </div>
+                    <div class="tab-panel{{(tab == "favorites" ? "" : " hidden")}}" data-tab-panel="favorites">
+                        <section class="panel">
+                            <h2>{{T(context, "Favorite servers")}}</h2>
+                            <p class="muted">{{T(context, "Favorites are stored per user.")}}</p>
+                            <div class="table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>{{T(context, "Name")}}</th>
+                                            <th>{{T(context, "Folder")}}</th>
+                                            <th>{{T(context, "Type")}}</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>{{favoriteRows}}</tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
                 </div>
             </section>
-            <div class="actions">
-                <form method="post" action="/logout" class="inline">
-                    {{Csrf(context)}}
-                    <button type="submit" class="danger">{{Icon("logout")}}{{T(context, "Logout")}}</button>
-                </form>
-            </div>
             """;
 
         return Layout(context, user, T(context, "Account"), body);
@@ -7781,7 +7813,22 @@ public sealed class HtmlViews
                     </nav>
                 </div>
                 {{adminMenu}}
-                <a class="shell-tab account-trigger{{accountClass}}" href="/account" data-shell-open-tab="1" data-shell-title="{{A(T(context, "Account"))}}">{{Icon("user")}}<span class="account-name">{{E(displayName)}}</span></a>
+                <details class="shell-menu account-menu{{accountClass}}">
+                    <summary class="shell-tab shell-menu-trigger account-trigger{{accountClass}}" aria-label="{{A(T(context, "Account"))}}">
+                        {{Icon("user")}}<span class="account-name">{{E(displayName)}}</span><span class="menu-caret">{{Icon("chevron-down")}}</span>
+                    </summary>
+                    <div class="menu-panel shell-menu-panel account-menu-panel">
+                        <div class="account-menu-head">
+                            <span class="account-menu-avatar">{{Icon("user")}}</span>
+                            <span class="account-menu-id"><strong>{{E(displayName)}}</strong><small>{{E(user!.UserName)}}</small></span>
+                        </div>
+                        <a class="shell-menu-item{{accountClass}}" href="/account" data-shell-open-tab="1" data-shell-title="{{A(T(context, "Account"))}}">{{Icon("settings")}}<span>{{T(context, "Account")}}</span></a>
+                        <form method="post" action="/logout" class="account-menu-logout">
+                            {{Csrf(context)}}
+                            <button type="submit" class="shell-menu-item shell-menu-logout">{{Icon("logout")}}<span>{{T(context, "Logout")}}</span></button>
+                        </form>
+                    </div>
+                </details>
             </div>
             """;
         // Compact single-bar layout: the global nav collapses into this burger menu.
@@ -7793,7 +7840,11 @@ public sealed class HtmlViews
                     <a class="shell-menu-item{{toolsClass}}" href="/tools" data-shell-open-tab="1" data-shell-title="{{A(T(context, "Tools"))}}">{{Icon("wrench")}}<span>{{T(context, "Tools")}}</span></a>
                     {{(canManageAdminArea ? $"""<a class="shell-menu-item{(adminActive ? " active" : "")}" href="/admin/servers" data-shell-open-tab="1" data-shell-title="{A(T(context, "Servers"))}">{Icon("server")}<span>{T(context, "Servers")}</span></a>""" : "")}}
                     {{(user!.IsAdmin ? $"""<a class="shell-menu-item" href="/admin/users" data-shell-open-tab="1" data-shell-title="{A(T(context, "Users"))}">{Icon("users")}<span>{T(context, "Users")}</span></a>""" : "")}}
-                    <a class="shell-menu-item account-trigger{{accountClass}}" href="/account" data-shell-open-tab="1" data-shell-title="{{A(T(context, "Account"))}}">{{Icon("user")}}<span class="account-name">{{E(displayName)}}</span></a>
+                    <a class="shell-menu-item account-trigger{{accountClass}}" href="/account" data-shell-open-tab="1" data-shell-title="{{A(T(context, "Account"))}}">{{Icon("settings")}}<span class="account-name">{{E(displayName)}}</span></a>
+                    <form method="post" action="/logout" class="account-menu-logout">
+                        {{Csrf(context)}}
+                        <button type="submit" class="shell-menu-item shell-menu-logout">{{Icon("logout")}}<span>{{T(context, "Logout")}}</span></button>
+                    </form>
                 </div>
             </details>
             """;
@@ -8135,6 +8186,91 @@ public sealed class HtmlViews
                     .shell-menu[open] > .shell-menu-trigger:focus-visible {
                         color: var(--accent);
                     }
+                    /* Dropdown items render as full-width rows with a hover state. */
+                    .shell-menu-panel .shell-menu-item {
+                        border-radius: var(--radius);
+                        width: 100%;
+                    }
+                    .shell-menu-panel .shell-menu-item:hover,
+                    .shell-menu-panel .shell-menu-item:focus-visible {
+                        background: var(--hover-bg);
+                    }
+                    .account-menu-panel { min-width: 224px; }
+                    .account-menu-head {
+                        align-items: center;
+                        border-bottom: 1px solid var(--line);
+                        display: flex;
+                        gap: 10px;
+                        margin-bottom: 4px;
+                        padding: 2px 6px 8px;
+                    }
+                    .account-menu-avatar {
+                        align-items: center;
+                        background: var(--surface-2);
+                        border: 1px solid var(--line);
+                        border-radius: 50%;
+                        color: var(--accent);
+                        display: inline-flex;
+                        flex: 0 0 auto;
+                        height: 34px;
+                        justify-content: center;
+                        width: 34px;
+                    }
+                    .account-menu-avatar .icon { height: 17px; width: 17px; }
+                    .account-menu-id { display: grid; min-width: 0; }
+                    .account-menu-id strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                    .account-menu-id small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                    .account-menu-logout { display: block; margin: 4px 0 0; }
+                    .shell-menu-logout {
+                        background: transparent;
+                        border: 0;
+                        border-top: 1px solid var(--line);
+                        cursor: pointer;
+                        font: inherit;
+                        justify-content: flex-start;
+                        margin-top: 4px;
+                        padding-top: 9px;
+                        text-align: left;
+                        width: 100%;
+                    }
+                    /* Generic in-page tabs (data-tabs + data-tab-target/data-tab-panel). Segmented control. */
+                    .tabs { display: flex; flex-direction: column; min-width: 0; }
+                    .tab-strip {
+                        align-items: stretch;
+                        background: var(--surface-2);
+                        border: 1px solid var(--line);
+                        border-radius: calc(var(--radius) + 2px);
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: 2px;
+                        margin-bottom: 16px;
+                        padding: 4px;
+                    }
+                    .tab-button {
+                        align-items: center;
+                        background: transparent;
+                        border: 0;
+                        border-radius: var(--radius);
+                        color: var(--muted);
+                        cursor: pointer;
+                        display: inline-flex;
+                        font: inherit;
+                        gap: 7px;
+                        min-height: 34px;
+                        padding: 6px 14px;
+                        text-decoration: none;
+                        transition: background-color .15s ease, color .15s ease;
+                    }
+                    .tab-button:hover { color: var(--text); }
+                    .tab-button.active {
+                        background: var(--surface);
+                        box-shadow: var(--shadow);
+                        color: var(--accent);
+                    }
+                    .tab-button .icon { height: 15px; width: 15px; }
+                    .tab-panel.hidden { display: none; }
+                    .tab-panels > .tab-panel > .panel:first-child,
+                    .tab-panels > .tab-panel > section:first-child { margin-top: 0; }
                     .shell-tab-main {
                         background: transparent;
                         border: 0;
@@ -10997,6 +11133,29 @@ public sealed class HtmlViews
                                 }
                             });
                         };
+
+                        // Generic in-page tabs: [data-tabs] with [data-tab-target] buttons + [data-tab-panel]
+                        // panels. Server-render sets the initial active tab; this adds client-side switching.
+                        document.querySelectorAll('[data-tabs]').forEach((root) => {
+                            const buttons = Array.from(root.querySelectorAll('[data-tab-target]'));
+                            const panels = Array.from(root.querySelectorAll('[data-tab-panel]'));
+                            const activate = (key) => {
+                                if (!panels.some((p) => p.dataset.tabPanel === key)) {
+                                    return;
+                                }
+                                buttons.forEach((b) => {
+                                    const on = b.dataset.tabTarget === key;
+                                    b.classList.toggle('active', on);
+                                    b.setAttribute('aria-selected', on ? 'true' : 'false');
+                                });
+                                panels.forEach((p) => p.classList.toggle('hidden', p.dataset.tabPanel !== key));
+                                try { history.replaceState(null, '', '?tab=' + encodeURIComponent(key)); } catch (e) { /* ignore */ }
+                            };
+                            buttons.forEach((b) => b.addEventListener('click', (event) => {
+                                event.preventDefault();
+                                activate(b.dataset.tabTarget);
+                            }));
+                        });
 
                         // Compact single-bar view: merges header + tab strip into one row and
                         // collapses the global nav into the burger menu. Persisted per browser.

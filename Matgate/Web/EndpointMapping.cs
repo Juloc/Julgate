@@ -330,6 +330,7 @@ public static class EndpointMapping
         app.MapGet("/account", AccountAsync).RequireAuthorization();
         app.MapGet("/about", AboutAsync).RequireAuthorization();
         app.MapPost("/account", UpdateAccountAsync).RequireAuthorization();
+        app.MapPost("/account/password", ChangeOwnPasswordAsync).RequireAuthorization();
         app.MapPost("/account/favorites/{id:guid}/toggle", ToggleFavoriteServerAsync).RequireAuthorization();
         app.MapPost("/api/tools/ping", ToolsPingAsync).RequireAuthorization();
         app.MapPost("/api/tools/lookup", ToolsLookupAsync).RequireAuthorization();
@@ -2726,6 +2727,63 @@ public static class EndpointMapping
         }
 
         return Results.Redirect(EmbedAwareRedirect(context, "/account"));
+    }
+
+    private static async Task<IResult> ChangeOwnPasswordAsync(
+        HttpContext context,
+        JsonDataStore store,
+        HtmlViews views,
+        PasswordHasher hasher)
+    {
+        var user = await RequireUserAsync(context, store);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        var form = await context.Request.ReadFormAsync(context.RequestAborted);
+        if (!ValidateCsrf(context, form))
+        {
+            return BadRequest(context, user, views);
+        }
+
+        var de = HtmlViews.Language(context) == "de";
+        var current = form["currentPassword"].ToString();
+        var next = form["newPassword"].ToString();
+        var confirm = form["confirmPassword"].ToString();
+
+        string? error = null;
+        if (!hasher.Verify(current, user.PasswordHash))
+        {
+            error = de ? "Das aktuelle Passwort ist falsch." : "Your current password is incorrect.";
+        }
+        else if (next.Length < 8)
+        {
+            error = de ? "Das neue Passwort muss mindestens 8 Zeichen haben." : "The new password must be at least 8 characters long.";
+        }
+        else if (!string.Equals(next, confirm, StringComparison.Ordinal))
+        {
+            error = de ? "Die neuen Passwoerter stimmen nicht ueberein." : "The new passwords do not match.";
+        }
+
+        if (error is not null)
+        {
+            return Results.Content(
+                views.Message(context, user, de ? "Passwort aendern" : "Change password", error),
+                "text/html");
+        }
+
+        await store.UpdateUsersAsync(users =>
+        {
+            var stored = users.FirstOrDefault(candidate => candidate.Id == user.Id);
+            if (stored is not null)
+            {
+                stored.PasswordHash = hasher.Hash(next);
+                stored.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+        }, context.RequestAborted);
+
+        return Results.Redirect(EmbedAwareRedirect(context, "/account?tab=security"));
     }
 
     private static async Task<IResult> ToggleFavoriteServerAsync(
