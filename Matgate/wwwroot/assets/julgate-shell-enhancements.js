@@ -1,12 +1,26 @@
 (() => {
   const isGerman = () => (document.documentElement.lang || '').toLowerCase().startsWith('de');
-  const editLabel = () => isGerman() ? 'Bearbeiten' : 'Edit';
+  const editLabel = () => isGerman() ? 'Verbindung bearbeiten' : 'Edit connection';
+  const createLabel = () => isGerman() ? 'Verbindung erstellen' : 'Create connection';
 
   const configureShellLink = (link, title) => {
     link.dataset.shellOpenTab = '1';
     link.dataset.shellTitle = title;
     link.title = title;
     link.setAttribute('aria-label', title);
+  };
+
+  const configureServerEditorLinks = () => {
+    document.querySelectorAll('a[href="/admin/servers/new"]').forEach(link => {
+      configureShellLink(link, createLabel());
+    });
+
+    document.querySelectorAll('a[href^="/admin/servers/"]').forEach(link => {
+      const href = link.getAttribute('href') || '';
+      if (/^\/admin\/servers\/[0-9a-f-]{36}$/i.test(href)) {
+        configureShellLink(link, editLabel());
+      }
+    });
   };
 
   const createEditLink = (href, compact) => {
@@ -19,7 +33,7 @@
     configureShellLink(link, title);
     link.innerHTML = compact
       ? '<span aria-hidden="true">✎</span>'
-      : `<span aria-hidden="true">✎</span><span>${title}</span>`;
+      : `<span aria-hidden="true">✎</span><span>${isGerman() ? 'Bearbeiten' : 'Edit'}</span>`;
     return link;
   };
 
@@ -52,6 +66,7 @@
   };
 
   const apply = () => {
+    configureServerEditorLinks();
     addCardEditActions();
     addTableEditActions();
   };
