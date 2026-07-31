@@ -33,6 +33,22 @@ public sealed class RdpCredentialCompatibilityTests
     }
 
     [Fact]
+    public void LegacyMatgateCredential_WrappedByOlderJulgate_IsFullyUnwrapped()
+    {
+        const string legacySecret = "legacy-matgate-secret-from-env";
+        const string password = "nested-RDP-password!";
+        var currentKey = RandomNumberGenerator.GetBytes(32);
+        var legacyValue = ProtectLegacyMatgate(password, legacySecret);
+        var nestedValue = ProtectCurrentEnvelope(legacyValue, currentKey);
+
+        using var protector = new CredentialProtector(
+            Convert.ToBase64String(currentKey),
+            legacyMatgateSecretKey: legacySecret);
+
+        Assert.Equal(password, protector.Unprotect(nestedValue));
+    }
+
+    [Fact]
     public void LegacyMatgateCredential_WithoutOriginalKeyFailsClosed()
     {
         var legacyValue = ProtectLegacyMatgate("secret", "original-matgate-key");
@@ -109,6 +125,23 @@ public sealed class RdpCredentialCompatibilityTests
     private static string ProtectLegacyMatgate(string plaintext, string legacySecret)
     {
         var key = SHA256.HashData(Encoding.UTF8.GetBytes(legacySecret.Trim()));
+        try
+        {
+            return ProtectAesGcmEnvelope("enc:1:", plaintext, key);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    private static string ProtectCurrentEnvelope(string plaintext, byte[] key)
+    {
+        return ProtectAesGcmEnvelope("julgate-aesgcm:v1:", plaintext, key);
+    }
+
+    private static string ProtectAesGcmEnvelope(string prefix, string plaintext, byte[] key)
+    {
         var nonce = RandomNumberGenerator.GetBytes(12);
         var tag = new byte[16];
         var data = Encoding.UTF8.GetBytes(plaintext);
@@ -122,11 +155,10 @@ public sealed class RdpCredentialCompatibilityTests
             nonce.CopyTo(payload, 0);
             tag.CopyTo(payload, nonce.Length);
             ciphertext.CopyTo(payload, nonce.Length + tag.Length);
-            return "enc:1:" + Convert.ToBase64String(payload);
+            return prefix + Convert.ToBase64String(payload);
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(key);
             CryptographicOperations.ZeroMemory(data);
         }
     }
