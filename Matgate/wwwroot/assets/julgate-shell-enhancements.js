@@ -65,11 +65,35 @@
     });
   };
 
+  const closeEmbeddedFileViewer = event => {
+    const target = event.target instanceof Element
+      ? event.target.closest('[data-file-viewer-close]')
+      : null;
+    if (!target) return;
+
+    // A standalone file-view page may still use its normal back-navigation. Only
+    // intercept the close action when the viewer is embedded in the session dialog.
+    const dialog = target.closest('dialog');
+    if (!(dialog instanceof HTMLDialogElement)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (dialog.open) {
+      dialog.close('file-viewer-close');
+    }
+  };
+
   const apply = () => {
     configureServerEditorLinks();
     addCardEditActions();
     addTableEditActions();
   };
+
+  // Capture before the shell's delegated tab handlers. The file viewer's close action
+  // must never bubble into connection-tab or window-close behavior.
+  document.addEventListener('click', closeEmbeddedFileViewer, true);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', apply, { once: true });
