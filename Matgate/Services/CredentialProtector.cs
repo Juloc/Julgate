@@ -135,7 +135,14 @@ public sealed class CredentialProtector : IDisposable
             {
                 using var aes = new AesGcm(key, TagSize);
                 aes.Decrypt(nonce, ciphertext, tag, plaintext);
-                return Encoding.UTF8.GetString(plaintext);
+                var unprotected = Encoding.UTF8.GetString(plaintext);
+
+                // Julgate 0.6.x could have wrapped an already-encrypted Matgate enc:1 value
+                // before legacy support existed. Never forward that nested ciphertext as the
+                // remote password; unwrap both layers and migrate it on the next store write.
+                return IsLegacyMatgateProtected(unprotected)
+                    ? UnprotectLegacyMatgate(unprotected)
+                    : unprotected;
             }
             catch (CryptographicException exception)
             {
