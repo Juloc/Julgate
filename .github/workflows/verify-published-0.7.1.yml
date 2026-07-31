@@ -1,0 +1,89 @@
+name: Verify published Julgate 0.7.1
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/verify-published-0.7.1.yml
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  verify-image:
+    name: Pull and start ghcr.io/juloc/julgate:0.7.1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=ghcr.io/juloc/julgate:0.7.1
+          for attempt in {1..60}; do
+            if docker pull "$image"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Verify image metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=ghcr.io/juloc/julgate:0.7.1
+          test "$(docker image inspect "$image" --format '{{.Config.User}}')" != ""
+          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')" = "0.7.1"
+
+      - name: Start and smoke test published image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker volume create julgate-published-071 >/dev/null
+          docker run --detach --name julgate-published-071 \
+            --publish 127.0.0.1:18089:8080 \
+            --volume julgate-published-071:/data \
+            --env ASPNETCORE_URLS=http://+:8080 \
+            --env JULGATE_DATA_DIR=/data \
+            --env JULGATE_ADMIN_USER=admin \
+            --env JULGATE_ADMIN_PASSWORD=ci-only-password-with-16-characters \
+            --env JULGATE_CREDENTIAL_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= \
+            --env JULGATE_GUACAMOLE_JSON_SECRET_KEY=fedcba98765432100123456789abcdef \
+            --env Guacamole__JsonSecretKey=fedcba98765432100123456789abcdef \
+            --env JULGATE_REQUIRE_SECURE_COOKIES=false \
+            ghcr.io/juloc/julgate:0.7.1
+
+          for attempt in {1..45}; do
+            if curl --fail --silent http://127.0.0.1:18089/healthz >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" == "45" ]]; then
+              docker logs julgate-published-071
+              exit 1
+            fi
+            sleep 2
+          done
+
+          curl --fail --silent http://127.0.0.1:18089/login > /tmp/login.html
+          curl --fail --silent http://127.0.0.1:18089/assets/julgate-ae01.css > /tmp/theme.css
+          grep --quiet 'Julgate' /tmp/login.html
+          grep --quiet 'julgate-storage-migration' /tmp/login.html
+          ! grep --quiet 'remainingSweeps' /tmp/login.html
+          ! grep --quiet 'setInterval' /tmp/login.html
+          ! grep --quiet 'max-width: 430px' /tmp/theme.css
+          test "$(docker inspect julgate-published-071 --format '{{.Config.User}}')" != ""
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm --force julgate-published-071 >/dev/null 2>&1 || true
+          docker volume rm julgate-published-071 >/dev/null 2>&1 || true
