@@ -32,13 +32,13 @@ jobs:
           done
           exit 1
 
-      - name: Verify image and default guacd drive path
+      - name: Verify image and writable guacd drive tmpfs
         shell: bash
         run: |
           set -euo pipefail
           test "$(docker image inspect ghcr.io/juloc/julgate:0.7.4 --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')" = "0.7.4"
           test "$(docker image inspect ghcr.io/juloc/julgate:0.7.4 --format '{{ .Config.User }}')" != ""
-          docker run --rm --entrypoint /bin/sh guacamole/guacd:1.6.0 -c 'mkdir -p /drive/verify && touch /drive/verify/write-test'
+          docker run --rm --tmpfs /drive:rw,mode=1777 --entrypoint /bin/sh guacamole/guacd:1.6.0 -c 'mkdir -p /drive/verify && touch /drive/verify/write-test'
 
       - name: Start and smoke test published image
         shell: bash
