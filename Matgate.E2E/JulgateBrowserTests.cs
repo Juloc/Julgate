@@ -33,7 +33,7 @@ public sealed partial class JulgateBrowserTests
         context.SetDefaultNavigationTimeout(15_000);
 
         var loginPage = await context.NewPageAsync();
-        Console.WriteLine("Checking anonymous protection and branding.");
+        Console.WriteLine("Checking anonymous protection, branding and live login layout.");
         await VerifyAnonymousRoutesAsync(loginPage);
         await VerifyLegacyStorageMigrationAsync(loginPage);
 
@@ -73,6 +73,54 @@ public sealed partial class JulgateBrowserTests
         var loginHtml = await page.ContentAsync();
         Assert.Contains("Julgate", loginHtml, StringComparison.Ordinal);
         Assert.DoesNotContain(">Matgate<", loginHtml, StringComparison.Ordinal);
+        await VerifyLiveLoginLayoutAsync(page);
+    }
+
+    private async Task VerifyLiveLoginLayoutAsync(IPage page)
+    {
+        var panel = page.Locator(".auth-panel");
+        var intro = page.Locator(".auth-panel > div").First;
+        var form = page.Locator(".auth-panel > form");
+        var username = page.Locator("input[name=username]");
+        var password = page.Locator("input[name=password]");
+        var submit = page.Locator("button[type=submit]");
+
+        await panel.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible });
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var panelBox = await panel.BoundingBoxAsync();
+        var introBox = await intro.BoundingBoxAsync();
+        var formBox = await form.BoundingBoxAsync();
+        var usernameBox = await username.BoundingBoxAsync();
+        var passwordBox = await password.BoundingBoxAsync();
+        var submitBox = await submit.BoundingBoxAsync();
+
+        Assert.NotNull(panelBox);
+        Assert.NotNull(introBox);
+        Assert.NotNull(formBox);
+        Assert.NotNull(usernameBox);
+        Assert.NotNull(passwordBox);
+        Assert.NotNull(submitBox);
+
+        Assert.True(panelBox!.Width >= 760, $"Login panel is unexpectedly narrow: {panelBox.Width}px.");
+        Assert.True(
+            introBox!.X + introBox.Width <= formBox!.X + 2,
+            "Login introduction overlaps the form column.");
+        Assert.InRange(usernameBox!.Height, 30, 60);
+        Assert.InRange(passwordBox!.Height, 30, 60);
+        Assert.InRange(submitBox!.Height, 30, 64);
+        Assert.True(await username.IsEditableAsync());
+        Assert.True(await password.IsEditableAsync());
+
+        await username.FillAsync("layout-check");
+        Assert.Equal("layout-check", await username.InputValueAsync());
+        await username.FillAsync(string.Empty);
+
+        await page.ScreenshotAsync(new PageScreenshotOptions
+        {
+            Path = Path.Combine(_artifactDirectory, "julgate-login-live.png"),
+            Timeout = 10_000
+        });
     }
 
     private async Task VerifyLegacyStorageMigrationAsync(IPage page)
