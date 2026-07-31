@@ -18,86 +18,73 @@ public sealed class Ae01ThemeMiddleware(RequestDelegate next)
             ['matgate.display.res.v3', 'julgate.display.res.v3'],
             ['matgate.view.mode.v1', 'julgate.view.mode.v1']
           ];
+
           const migrate = storage => {
             try {
               mappings.forEach(([legacy, current]) => {
-                if (storage.getItem(current) === null && storage.getItem(legacy) !== null) {
-                  storage.setItem(current, storage.getItem(legacy));
+                const legacyValue = storage.getItem(legacy);
+                if (storage.getItem(current) === null && legacyValue !== null) {
+                  storage.setItem(current, legacyValue);
                 }
                 storage.removeItem(legacy);
               });
+
               for (let index = storage.length - 1; index >= 0; index -= 1) {
                 const key = storage.key(index);
                 if (!key || !key.startsWith('matgate.workspace.panel.')) continue;
                 const current = `julgate.workspace.panel.${key.substring('matgate.workspace.panel.'.length)}`;
-                if (storage.getItem(current) === null) storage.setItem(current, storage.getItem(key));
+                const legacyValue = storage.getItem(key);
+                if (storage.getItem(current) === null && legacyValue !== null) {
+                  storage.setItem(current, legacyValue);
+                }
                 storage.removeItem(key);
               }
-            } catch { }
-          };
-          const brand = value => typeof value === 'string'
-            ? value.replaceAll('MATGATE', 'JULGATE').replaceAll('Matgate', 'Julgate')
-            : value;
-          const brandTree = root => {
-            if (!root) return;
-            if (root.nodeType === Node.TEXT_NODE) {
-              const parent = root.parentElement;
-              if (!parent || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA'].includes(parent.tagName)) return;
-              const branded = brand(root.nodeValue);
-              if (branded !== root.nodeValue) root.nodeValue = branded;
-              return;
+            } catch {
+              // Storage can be unavailable in restricted browser contexts.
             }
-            if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
-            if (root.nodeType === Node.ELEMENT_NODE) {
-              ['title', 'aria-label', 'alt', 'placeholder'].forEach(attribute => {
-                if (!root.hasAttribute(attribute)) return;
-                const current = root.getAttribute(attribute);
-                const branded = brand(current);
-                if (branded !== current) root.setAttribute(attribute, branded);
-              });
-            }
-            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-            while (walker.nextNode()) brandTree(walker.currentNode);
           };
-          const brandSplitLogos = () => {
-            document.querySelectorAll('.brand-word').forEach(element => {
+
+          const synchronizeProductMark = root => {
+            const elements = [];
+            if (root instanceof Element && root.matches('.brand-word')) elements.push(root);
+            if (root && typeof root.querySelectorAll === 'function') {
+              elements.push(...root.querySelectorAll('.brand-word'));
+            }
+
+            elements.forEach(element => {
               if ((element.textContent || '').replace(/\s+/g, '').toUpperCase() === 'MATGATE') {
                 element.innerHTML = '<span>JUL</span>GATE';
               }
             });
+
+            if (document.title.includes('Matgate') || document.title.includes('MATGATE')) {
+              document.title = document.title
+                .replaceAll('MATGATE', 'JULGATE')
+                .replaceAll('Matgate', 'Julgate');
+            }
           };
+
           migrate(window.localStorage);
           migrate(window.sessionStorage);
-          const startBranding = () => {
-            const sweep = () => {
-              document.title = brand(document.title);
-              brandTree(document.documentElement);
-              brandSplitLogos();
-            };
-            sweep();
-            const observer = new MutationObserver(records => {
-              records.forEach(record => {
-                if (record.type === 'characterData') brandTree(record.target);
-                record.addedNodes.forEach(brandTree);
-              });
-              document.title = brand(document.title);
-              brandSplitLogos();
-            });
-            observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
 
-            // The legacy client shell writes parts of the header asynchronously during boot.
-            // Repeat a bounded sweep so late writes cannot restore product-facing Matgate text.
-            let remainingSweeps = 80;
-            const sweepTimer = window.setInterval(() => {
-              sweep();
-              remainingSweeps -= 1;
-              if (remainingSweeps <= 0) window.clearInterval(sweepTimer);
-            }, 100);
+          const start = () => {
+            synchronizeProductMark(document);
+
+            // The legacy shell can replace its header once during startup. Observe only
+            // newly inserted elements instead of repeatedly scanning the complete DOM.
+            const observer = new MutationObserver(records => {
+              records.forEach(record => record.addedNodes.forEach(node => {
+                if (node.nodeType === Node.ELEMENT_NODE) synchronizeProductMark(node);
+              }));
+            });
+            observer.observe(document.documentElement, { subtree: true, childList: true });
+            window.setTimeout(() => observer.disconnect(), 5000);
           };
+
           if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', startBranding, { once: true });
+            document.addEventListener('DOMContentLoaded', start, { once: true });
           } else {
-            startBranding();
+            start();
           }
         })();
         </script>

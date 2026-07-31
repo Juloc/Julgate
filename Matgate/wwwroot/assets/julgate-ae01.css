@@ -261,6 +261,12 @@ input[type="radio"] {
     letter-spacing: -.025em;
 }
 
+/* The base shell owns layout and responsive structure. The theme only changes
+   visual tokens so two-column forms such as the login page cannot collapse. */
+.auth-panel > * {
+    min-width: 0;
+}
+
 .home-browser-layout {
     gap: 12px !important;
 }
@@ -322,11 +328,6 @@ tr:hover td {
     border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line)) !important;
 }
 
-.auth-panel {
-    max-width: 430px !important;
-    padding: 28px !important;
-}
-
 .session-tab {
     border-right: 1px solid var(--line) !important;
 }
@@ -355,14 +356,6 @@ tr:hover td {
 @media (max-width: 760px) {
     .dashboard-view {
         padding: 14px 10px 36px !important;
-    }
-
-    .auth-panel {
-        border-left: 0 !important;
-        border-right: 0 !important;
-        border-radius: 0 !important;
-        box-shadow: none !important;
-        max-width: none !important;
     }
 
     .home-browser-sidebar {
