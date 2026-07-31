@@ -1,0 +1,72 @@
+name: Verify published Julgate 0.7.4
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  verify:
+    name: Pull and start ghcr.io/juloc/julgate:0.7.4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..60}; do
+            if docker pull ghcr.io/juloc/julgate:0.7.4; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Verify image and default guacd drive path
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect ghcr.io/juloc/julgate:0.7.4 --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')" = "0.7.4"
+          test "$(docker image inspect ghcr.io/juloc/julgate:0.7.4 --format '{{ .Config.User }}')" != ""
+          docker run --rm --entrypoint /bin/sh guacamole/guacd:1.6.0 -c 'mkdir -p /drive/verify && touch /drive/verify/write-test'
+
+      - name: Start and smoke test published image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/julgate-data
+          chmod 0777 /tmp/julgate-data
+          docker run --detach --name julgate-verify \
+            --publish 127.0.0.1:18088:8080 \
+            --volume /tmp/julgate-data:/data \
+            --env ASPNETCORE_URLS=http://+:8080 \
+            --env JULGATE_DATA_DIR=/data \
+            --env JULGATE_ADMIN_USER=admin \
+            --env JULGATE_ADMIN_PASSWORD=verification-password-123 \
+            --env JULGATE_CREDENTIAL_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= \
+            --env JULGATE_GUACAMOLE_JSON_SECRET_KEY=fedcba98765432100123456789abcdef \
+            --env Guacamole__JsonSecretKey=fedcba98765432100123456789abcdef \
+            --env JULGATE_REQUIRE_SECURE_COOKIES=false \
+            ghcr.io/juloc/julgate:0.7.4
+          for attempt in {1..60}; do
+            curl --fail --silent http://127.0.0.1:18088/healthz >/tmp/health.json && break
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:18088/login >/tmp/login.html
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker logs julgate-verify || true
+          docker rm --force julgate-verify || true
+          rm -rf /tmp/julgate-data || true
