@@ -6,11 +6,13 @@ namespace Matgate.Services;
 public sealed class CredentialProtector : IDisposable
 {
     private const string Prefix = "julgate-aesgcm:v1:";
+    private const string LegacyMatgatePrefix = "enc:1:";
     private const int KeySize = 32;
     private const int NonceSize = 12;
     private const int TagSize = 16;
     private readonly byte[] _primaryKey;
     private readonly IReadOnlyList<byte[]> _decryptionKeys;
+    private readonly byte[]? _legacyMatgateKey;
 
     public CredentialProtector(IConfiguration configuration)
         : this(
@@ -18,11 +20,17 @@ public sealed class CredentialProtector : IDisposable
             ?? configuration["Julgate:CredentialKey"]
             ?? "",
             SecretValueReader.Read("JULGATE_CREDENTIAL_KEY_PREVIOUS")
-            ?? configuration["Julgate:CredentialKeyPrevious"])
+            ?? configuration["Julgate:CredentialKeyPrevious"],
+            SecretValueReader.Read("JULGATE_LEGACY_MATGATE_SECRET_KEY", "MATGATE_SECRET_KEY")
+            ?? configuration["Julgate:LegacyMatgateSecretKey"]
+            ?? configuration["Matgate:SecretKey"])
     {
     }
 
-    public CredentialProtector(string base64Key, string? previousBase64Keys = null)
+    public CredentialProtector(
+        string base64Key,
+        string? previousBase64Keys = null,
+        string? legacyMatgateSecretKey = null)
     {
         _primaryKey = DecodeKey(base64Key, "JULGATE_CREDENTIAL_KEY");
         var keys = new List<byte[]> { _primaryKey };
@@ -42,6 +50,9 @@ public sealed class CredentialProtector : IDisposable
         }
 
         _decryptionKeys = keys;
+        _legacyMatgateKey = string.IsNullOrWhiteSpace(legacyMatgateSecretKey)
+            ? null
+            : SHA256.HashData(Encoding.UTF8.GetBytes(legacyMatgateSecretKey.Trim()));
     }
 
     public string Protect(string? value)
@@ -49,6 +60,13 @@ public sealed class CredentialProtector : IDisposable
         if (string.IsNullOrEmpty(value) || IsProtected(value))
         {
             return value ?? "";
+        }
+
+        // Matgate 0.6.1 used a different self-describing AES-GCM format. Decrypt it
+        // before writing so the next store update migrates it to Julgate's current format.
+        if (IsLegacyMatgateProtected(value))
+        {
+            value = UnprotectLegacyMatgate(value);
         }
 
         var plaintext = Encoding.UTF8.GetBytes(value);
@@ -75,9 +93,19 @@ public sealed class CredentialProtector : IDisposable
 
     public string Unprotect(string? value)
     {
-        if (string.IsNullOrEmpty(value) || !IsProtected(value))
+        if (string.IsNullOrEmpty(value))
         {
             return value ?? "";
+        }
+
+        if (IsLegacyMatgateProtected(value))
+        {
+            return UnprotectLegacyMatgate(value);
+        }
+
+        if (!IsProtected(value))
+        {
+            return value;
         }
 
         byte[] payload;
@@ -127,11 +155,67 @@ public sealed class CredentialProtector : IDisposable
         return value?.StartsWith(Prefix, StringComparison.Ordinal) == true;
     }
 
+    internal static bool IsLegacyMatgateProtected(string? value)
+    {
+        return value?.StartsWith(LegacyMatgatePrefix, StringComparison.Ordinal) == true;
+    }
+
     public void Dispose()
     {
         foreach (var key in _decryptionKeys)
         {
             CryptographicOperations.ZeroMemory(key);
+        }
+
+        if (_legacyMatgateKey is not null)
+        {
+            CryptographicOperations.ZeroMemory(_legacyMatgateKey);
+        }
+    }
+
+    private string UnprotectLegacyMatgate(string value)
+    {
+        if (_legacyMatgateKey is null)
+        {
+            throw new InvalidOperationException(
+                "A stored Matgate credential uses the legacy enc:1 format. Set "
+                + "JULGATE_LEGACY_MATGATE_SECRET_KEY (or MATGATE_SECRET_KEY) to the original "
+                + "Matgate secret, then restart Julgate so the credential can be migrated.");
+        }
+
+        byte[] payload;
+        try
+        {
+            payload = Convert.FromBase64String(value[LegacyMatgatePrefix.Length..]);
+        }
+        catch (FormatException exception)
+        {
+            throw LegacyDecryptionFailure(exception);
+        }
+
+        if (payload.Length < NonceSize + TagSize)
+        {
+            throw LegacyDecryptionFailure(new CryptographicException("Legacy credential payload is too short."));
+        }
+
+        var nonce = payload.AsSpan(0, NonceSize);
+        var tag = payload.AsSpan(NonceSize, TagSize);
+        var ciphertext = payload.AsSpan(NonceSize + TagSize);
+        var plaintext = new byte[ciphertext.Length];
+
+        try
+        {
+            using var aes = new AesGcm(_legacyMatgateKey, TagSize);
+            aes.Decrypt(nonce, ciphertext, tag, plaintext);
+            return Encoding.UTF8.GetString(plaintext);
+        }
+        catch (CryptographicException exception)
+        {
+            throw LegacyDecryptionFailure(exception);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
         }
     }
 
@@ -163,6 +247,13 @@ public sealed class CredentialProtector : IDisposable
     {
         return new InvalidOperationException(
             "A stored Julgate credential cannot be decrypted. Restore the matching primary or previous credential key.",
+            exception);
+    }
+
+    private static InvalidOperationException LegacyDecryptionFailure(Exception exception)
+    {
+        return new InvalidOperationException(
+            "A stored Matgate enc:1 credential cannot be decrypted. Restore the original MATGATE_SECRET_KEY.",
             exception);
     }
 }
