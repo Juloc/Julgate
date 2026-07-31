@@ -1,6 +1,4 @@
-using System.Net;
 using System.Text;
-using System.Threading.RateLimiting;
 using Matgate.Services;
 using Matgate.Web;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -24,6 +22,9 @@ var requireSecureCookies = ReadBoolean("JULGATE_REQUIRE_SECURE_COOKIES", !builde
 var trustForwardedHeaders = ReadBoolean("JULGATE_TRUST_FORWARD_HEADERS", true);
 var enableWebsiteProxy = ReadBoolean("JULGATE_ENABLE_WEBSITE_PROXY", false);
 var enableNetworkTools = ReadBoolean("JULGATE_ENABLE_NETWORK_TOOLS", false);
+var loginRateLimit = Math.Clamp(ReadPositiveInt("JULGATE_RATE_LIMIT_LOGIN_PER_MINUTE", 10), 1, 120);
+var writeRateLimit = Math.Clamp(ReadPositiveInt("JULGATE_RATE_LIMIT_WRITES_PER_MINUTE", 120), 1, 10_000);
+var readRateLimit = Math.Clamp(ReadPositiveInt("JULGATE_RATE_LIMIT_READS_PER_MINUTE", 1200), 1, 100_000);
 
 Directory.CreateDirectory(keyDirectory);
 SetPrivateDirectoryPermissions(dataDirectory);
@@ -75,24 +76,18 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-    {
-        var isLoginAttempt = HttpMethods.IsPost(context.Request.Method)
-            && string.Equals(context.Request.Path.Value, "/login", StringComparison.OrdinalIgnoreCase);
-        var partition = $"{context.Connection.RemoteIpAddress ?? IPAddress.None}:{(isLoginAttempt ? "login" : "global")}";
-
-        return RateLimitPartition.GetFixedWindowLimiter(partition, _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = isLoginAttempt ? 10 : 240,
-            Window = TimeSpan.FromMinutes(1),
-            QueueLimit = 0,
-            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-            AutoReplenishment = true
-        });
-    });
+        RequestRateLimitPolicy.CreatePartition(
+            context,
+            loginRateLimit,
+            writeRateLimit,
+            readRateLimit));
     options.OnRejected = static async (context, cancellationToken) =>
     {
         context.HttpContext.Response.ContentType = "text/plain; charset=utf-8";
-        await context.HttpContext.Response.WriteAsync("Too many requests.", cancellationToken);
+        context.HttpContext.Response.Headers.RetryAfter = "60";
+        await context.HttpContext.Response.WriteAsync(
+            "Too many requests. Retry in one minute.",
+            cancellationToken);
     };
 });
 
@@ -179,12 +174,12 @@ app.Use(async (context, next) =>
 });
 
 app.UseRouting();
-app.UseRateLimiter();
 app.UseWebSockets(new WebSocketOptions
 {
     KeepAliveInterval = TimeSpan.FromSeconds(30)
 });
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.Use(async (context, next) =>
 {
