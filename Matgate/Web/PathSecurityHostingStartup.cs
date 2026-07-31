@@ -20,6 +20,7 @@ public sealed class PathSecurityHostingStartup : IHostingStartup
         {
             return app =>
             {
+                app.UseMiddleware<JulgateShellCompatibilityMiddleware>();
                 app.UseMiddleware<RequestBodyLimitMiddleware>();
                 app.UseMiddleware<PathTraversalGuardMiddleware>();
                 app.UseMiddleware<CrossOriginGuardMiddleware>();
