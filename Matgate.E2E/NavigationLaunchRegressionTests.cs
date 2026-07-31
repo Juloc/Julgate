@@ -15,7 +15,7 @@ public sealed class NavigationLaunchRegressionTests
         ?? throw new InvalidOperationException("JULGATE_ADMIN_PASSWORD is required for E2E tests.");
 
     [Fact]
-    public async Task ShellNavigationLaunchAndEditActions_WorkInTheRunningApplication()
+    public async Task ShellNavigationLaunchAndEditorActions_WorkInTheRunningApplication()
     {
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
@@ -33,7 +33,7 @@ public sealed class NavigationLaunchRegressionTests
         var page = await context.NewPageAsync();
         await LoginAsync(page);
 
-        await VerifyExplicitEditActionAsync(page);
+        await VerifyConsistentEditorActionsAsync(page);
         await VerifySameOriginEmbeddedPagesAsync(page);
         await VerifyBrandedCsrfLaunchAsync(context);
     }
@@ -57,17 +57,29 @@ public sealed class NavigationLaunchRegressionTests
         Assert.NotEmpty(cookies);
     }
 
-    private async Task VerifyExplicitEditActionAsync(IPage page)
+    private async Task VerifyConsistentEditorActionsAsync(IPage page)
     {
         await page.GotoAsync(
             $"{_baseUrl}/",
             new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+
+        var createAction = page.Locator("a[href='/admin/servers/new']").First;
+        await createAction.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible });
+        Assert.Equal("1", await createAction.GetAttributeAsync("data-shell-open-tab"));
+        Assert.Contains(
+            "connection",
+            await createAction.GetAttributeAsync("data-shell-title") ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
 
         var editAction = page.Locator(".connection-choice .julgate-server-edit-action").First;
         await editAction.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible });
         var href = await editAction.GetAttributeAsync("href");
         Assert.Matches("^/admin/servers/[0-9a-f-]{36}$", href ?? string.Empty);
         Assert.Equal("1", await editAction.GetAttributeAsync("data-shell-open-tab"));
+        Assert.Contains(
+            "connection",
+            await editAction.GetAttributeAsync("data-shell-title") ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task VerifySameOriginEmbeddedPagesAsync(IPage page)
