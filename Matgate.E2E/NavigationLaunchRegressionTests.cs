@@ -53,7 +53,7 @@ public sealed class NavigationLaunchRegressionTests
                 && candidate.Url.EndsWith("/login", StringComparison.OrdinalIgnoreCase));
 
         Assert.True(response.Status is >= 200 and < 400, $"Login returned HTTP {response.Status}.");
-        var cookies = await contextCookiesAsync(page.Context);
+        var cookies = await ContextCookiesAsync(page.Context);
         Assert.NotEmpty(cookies);
     }
 
@@ -90,8 +90,9 @@ public sealed class NavigationLaunchRegressionTests
                 "url => { const old = document.getElementById('shell-regression-frame'); if (old) old.remove(); const frame = document.createElement('iframe'); frame.id = 'shell-regression-frame'; frame.src = url; frame.style.width = '900px'; frame.style.height = '700px'; document.body.append(frame); }",
                 $"{_baseUrl}{route}");
 
-            var frameLocator = page.Locator("#shell-regression-frame");
-            var frame = await frameLocator.ContentFrameAsync();
+            var frameElement = await page.Locator("#shell-regression-frame").ElementHandleAsync();
+            Assert.NotNull(frameElement);
+            var frame = await frameElement!.ContentFrameAsync();
             Assert.NotNull(frame);
             await frame!.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
             var bodyText = await frame.Locator("body").InnerTextAsync();
@@ -102,7 +103,7 @@ public sealed class NavigationLaunchRegressionTests
 
     private async Task VerifyBrandedCsrfLaunchAsync(IBrowserContext context)
     {
-        var cookies = await contextCookiesAsync(context);
+        var cookies = await ContextCookiesAsync(context);
         var cookieHeader = string.Join("; ", cookies.Select(cookie => $"{cookie.Name}={cookie.Value}"));
 
         using var handler = new HttpClientHandler { AllowAutoRedirect = true };
@@ -131,7 +132,8 @@ public sealed class NavigationLaunchRegressionTests
         Assert.Contains("connectionName", body, StringComparison.Ordinal);
     }
 
-    private static async Task<IReadOnlyList<BrowserContextCookiesResult>> contextCookiesAsync(IBrowserContext context)
+    private static async Task<IReadOnlyList<BrowserContextCookiesResult>> ContextCookiesAsync(
+        IBrowserContext context)
     {
         return await context.CookiesAsync();
     }
