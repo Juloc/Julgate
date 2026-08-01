@@ -4280,16 +4280,17 @@ public sealed class HtmlViews
                                 true);
                             connectionTabActions.appendChild(pointerButton);
 
-                            if (tab.oskInput) {
+                            if (tab.inputSink) {
                                 const keyboardButton = createTabActionButton(
                                     actionIcons.keyboard,
                                     uiText.showKeyboard || 'Show/hide keyboard',
                                     () => {
-                                        if (document.activeElement === tab.oskInput) {
-                                            tab.oskInput.blur();
+                                        const inputElement = tab.inputSink.getElement();
+                                        if (document.activeElement === inputElement) {
+                                            inputElement.blur();
                                         }
                                         else {
-                                            tab.oskInput.focus();
+                                            tab.inputSink.focus();
                                         }
                                     },
                                     '',
@@ -5530,38 +5531,18 @@ public sealed class HtmlViews
                         // Two-finger pinch to zoom / pan the remote view (touch devices only).
                         setupPinchZoom(tab);
 
-                        // Hidden input to raise the device's native keyboard on touch devices and forward
-                        // typed characters to the remote as key events (reliable across mobile browsers).
+                        // Guacamole.InputSink is the single mobile text-input source. Its events
+                        // bubble through the same Guacamole.Keyboard instance as hardware keys,
+                        // preventing Android IME input from being transmitted twice.
                         if (isTouchDevice) {
-                            const oskInput = document.createElement('textarea');
-                            oskInput.className = 'osk-input';
-                            oskInput.setAttribute('autocapitalize', 'off');
-                            oskInput.setAttribute('autocomplete', 'off');
-                            oskInput.setAttribute('autocorrect', 'off');
-                            oskInput.setAttribute('spellcheck', 'false');
-                            oskInput.setAttribute('aria-hidden', 'true');
-                            oskInput.tabIndex = -1;
-                            tab.panel.appendChild(oskInput);
-                            tab.oskInput = oskInput;
-                            const sendKeysym = keysym => {
-                                client.sendKeyEvent(1, keysym);
-                                client.sendKeyEvent(0, keysym);
-                            };
-                            oskInput.addEventListener('beforeinput', event => {
-                                if (event.inputType === 'insertText' && event.data) {
-                                    for (const ch of event.data) {
-                                        const cp = ch.codePointAt(0);
-                                        sendKeysym(cp < 0x100 ? cp : 0x01000000 + cp);
-                                    }
-                                }
-                                else if (event.inputType === 'insertLineBreak') {
-                                    sendKeysym(0xFF0D);
-                                }
-                                else if (event.inputType === 'deleteContentBackward') {
-                                    sendKeysym(0xFF08);
-                                }
-                            });
-                            oskInput.addEventListener('input', () => { oskInput.value = ''; });
+                            tab.inputSink?.getElement().remove();
+
+                            const inputSink = new Guacamole.InputSink();
+                            const inputElement = inputSink.getElement();
+                            inputElement.classList.add('osk-input');
+                            inputElement.setAttribute('aria-hidden', 'true');
+                            tab.panel.appendChild(inputElement);
+                            tab.inputSink = inputSink;
                         }
 
                         tab.keyboard = new Guacamole.Keyboard(tab.panel);

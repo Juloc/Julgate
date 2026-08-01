@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.7 — 2026-08-01
+
+### Remote sessions
+
+- Replace the custom Android `beforeinput` forwarding path with Guacamole 1.6 `InputSink`.
+- Route native mobile and hardware keyboard input through one `Guacamole.Keyboard` instance so RDP characters are sent exactly once.
+- Add a regression test that rejects the former duplicate mobile input path.
+
+### Upstream
+
+- Recheck `Real-TTX/Matgate` at `8f27b00585f44e68e6867a1b5a21eb08cc32f441`; no newer upstream commits require integration.
+- Keep selective upstream synchronization instead of merging security, credential or deployment code over Julgate.
+
 ## 0.7.6 — 2026-07-31
 
 ### Interface
