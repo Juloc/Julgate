@@ -7,8 +7,8 @@ Julgate originated from `Real-TTX/Matgate`, but both repositories now have indep
 - Upstream repository: `Real-TTX/Matgate`
 - Upstream branch: `main`
 - Last reviewed upstream commit: `8f27b00585f44e68e6867a1b5a21eb08cc32f441` (Matgate 0.7.0)
-- Common merge base: `c36a7879e3a780ead649fd76a38fcdc702e31a1c`
-- At the 2026-07-31 review, Julgate was 13 commits ahead and 4 upstream commits behind.
+- Original common merge base: `c36a7879e3a780ead649fd76a38fcdc702e31a1c`
+- Upstream commit `8f27b00585f44e68e6867a1b5a21eb08cc32f441` was recorded as reviewed ancestry on 2026-08-01, so Julgate is no longer behind that Matgate state.
 
 ## Policy
 
@@ -33,4 +33,4 @@ For every new upstream commit:
 
 ## Reviewed Matgate 0.7.0 changes
 
-The four upstream commits after the common base were reviewed. Their security and credential changes overlap with stricter Julgate implementations and are therefore not imported wholesale. The account-menu, account-tabs and self-service password-change UI from Matgate 0.7.0 remains a candidate for a separate manual Julgate port, where it can be tested against Julgate's embedded-tab and security behavior.
+The four upstream commits after the original common base were reviewed. Their security and credential changes overlap with stricter Julgate implementations and were not imported wholesale. The self-service password change was ported through Julgate 0.7.8 with Julgate-specific validation and regression tests. Matgate's account-menu and generic account-tabs were not imported because Julgate uses a different shell and embedded-tab architecture; they remain optional standalone UX work rather than an upstream merge requirement.
