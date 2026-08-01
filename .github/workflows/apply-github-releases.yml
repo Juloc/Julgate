@@ -5,7 +5,7 @@ on:
     branches:
       - agent/version-github-releases
     paths:
-      - patches/apply-github-releases.py
+      - "patches/**"
 
 permissions:
   contents: write
@@ -33,9 +33,8 @@ jobs:
 
       - name: Commit validated release integration
         run: |
-          rm -f patches/apply-github-releases.py
+          rm -rf patches
           rm -f .github/workflows/apply-github-releases.yml
-          rmdir patches 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
