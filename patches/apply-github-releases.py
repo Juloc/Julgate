@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Trigger the migration workflow after its workflow file exists.
 ROOT = Path(__file__).resolve().parents[1]
 
 
