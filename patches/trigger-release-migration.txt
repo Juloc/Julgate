@@ -1,1 +1,1 @@
-Apply the prepared GitHub Release integration on main.
+Apply the registered GitHub Release integration after merge.
