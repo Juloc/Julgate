@@ -1,0 +1,266 @@
+name: Julgate release
+
+on:
+  workflow_run:
+    workflows:
+      - Julgate build
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+  packages: write
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: julgate-release
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  prepare:
+    name: Verify release readiness
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      head_sha: ${{ steps.source.outputs.head_sha }}
+      version: ${{ steps.version.outputs.version }}
+      major_minor: ${{ steps.version.outputs.major_minor }}
+      image_name: ${{ steps.version.outputs.image_name }}
+      should_release: ${{ steps.version.outputs.should_release }}
+    steps:
+      - name: Resolve source commit
+        id: source
+        env:
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          head_sha="${WORKFLOW_RUN_SHA:-${GITHUB_SHA}}"
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out verified commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.source.outputs.head_sha }}
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ steps.source.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/.*<VersionPrefix>\([^<]*\)<\/VersionPrefix>.*/\1/p' Matgate/Matgate.csproj | head -n 1)"
+          if [[ ! "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "VersionPrefix must be a stable semantic version such as 1.2.3."
+            exit 1
+          fi
+
+          major_minor="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          tag="v${version}"
+          image_name="${REGISTRY}/${GITHUB_REPOSITORY,,}"
+
+          if ! grep --extended-regexp --quiet "^## ${version}([[:space:]]|$)" CHANGELOG.md; then
+            echo "CHANGELOG.md has no section for ${version}."
+            exit 1
+          fi
+
+          git fetch --force --tags
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            should_release=false
+          else
+            should_release=true
+            if git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null; then
+              tag_commit="$(git rev-list -n 1 "${tag}")"
+              if [[ "${tag_commit}" != "${HEAD_SHA}" ]]; then
+                echo "Existing tag ${tag} points to ${tag_commit}, not ${HEAD_SHA}."
+                exit 1
+              fi
+            fi
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "major_minor=${major_minor}" >> "$GITHUB_OUTPUT"
+          echo "image_name=${image_name}" >> "$GITHUB_OUTPUT"
+          echo "should_release=${should_release}" >> "$GITHUB_OUTPUT"
+
+      - name: Require all Julgate validations
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ steps.source.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            "Julgate build"
+            "Julgate security"
+            "Julgate completion validation"
+            "Julgate file protocol integration"
+            "Julgate operations validation"
+          )
+
+          ready=false
+          for attempt in {1..30}; do
+            runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100")"
+            pending=false
+
+            for workflow_name in "${required[@]}"; do
+              status="$(jq --raw-output --arg name "${workflow_name}" \
+                '[.workflow_runs[] | select(.name == $name)] | sort_by(.run_number) | last | .status // "missing"' \
+                <<<"${runs}")"
+              conclusion="$(jq --raw-output --arg name "${workflow_name}" \
+                '[.workflow_runs[] | select(.name == $name)] | sort_by(.run_number) | last | .conclusion // ""' \
+                <<<"${runs}")"
+
+              if [[ "${status}" == "completed" && "${conclusion}" != "success" ]]; then
+                echo "${workflow_name} completed with ${conclusion}."
+                exit 1
+              fi
+
+              if [[ "${status}" != "completed" ]]; then
+                pending=true
+              fi
+            done
+
+            if [[ "${pending}" == "false" ]]; then
+              ready=true
+              break
+            fi
+
+            sleep 10
+          done
+
+          if [[ "${ready}" != "true" ]]; then
+            echo "Required validation workflows did not all complete successfully."
+            exit 1
+          fi
+
+  publish:
+    name: Publish Julgate release
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out verified commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.head_sha }}
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create release image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.prepare.outputs.image_name }}
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=${{ needs.prepare.outputs.major_minor }}
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build and publish stable image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Matgate/Dockerfile
+          build-args: |
+            JULGATE_VERSION=${{ needs.prepare.outputs.version }}
+            JULGATE_BUILD_TAG=github-release
+            JULGATE_BUILD_TIME=${{ github.event.workflow_run.updated_at || github.event.repository.updated_at }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          IMAGE_NAME: ${{ needs.prepare.outputs.image_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "GitHub Release ${tag} already exists."
+            exit 0
+          fi
+
+          awk -v version="${VERSION}" '
+            $0 ~ "^## " version "([[:space:]]|$)" { capture=1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md > /tmp/julgate-changelog.md
+
+          if [[ ! -s /tmp/julgate-changelog.md ]]; then
+            echo "CHANGELOG.md has no section for ${VERSION}."
+            exit 1
+          fi
+
+          {
+            echo "## Container image"
+            echo
+            echo "\`${IMAGE_NAME}:${VERSION}\`"
+            echo
+            cat /tmp/julgate-changelog.md
+          } > /tmp/julgate-release-notes.md
+
+          staging="$(mktemp -d)"
+          cp docker-compose-simple.yaml "${staging}/"
+          cp docker-compose-dockhand.yaml "${staging}/"
+          cp docker-compose-secrets.yaml "${staging}/"
+          cp docker-compose-key-rotation.yaml "${staging}/"
+          cp .env.example "${staging}/julgate.env.example"
+          cp docs/OPERATIONS.md "${staging}/OPERATIONS.md"
+
+          archive="julgate-${VERSION}-deployment.tar.gz"
+          tar --create --gzip --file "${archive}" --directory "${staging}" .
+          sha256sum "${archive}" > "${archive}.sha256"
+
+          git fetch --force --tags
+          release_args=(
+            gh release create "${tag}"
+            --title "Julgate ${VERSION}"
+            --notes-file /tmp/julgate-release-notes.md
+            --latest
+          )
+
+          if git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null; then
+            tag_commit="$(git rev-list -n 1 "${tag}")"
+            if [[ "${tag_commit}" != "${HEAD_SHA}" ]]; then
+              echo "Existing tag ${tag} points to ${tag_commit}, not ${HEAD_SHA}."
+              exit 1
+            fi
+            release_args+=(--verify-tag)
+          else
+            release_args+=(--target "${HEAD_SHA}")
+          fi
+
+          release_args+=("${archive}" "${archive}.sha256")
+          "${release_args[@]}"
