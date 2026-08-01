@@ -1,0 +1,43 @@
+name: Apply GitHub Release versioning
+
+on:
+  push:
+    branches:
+      - agent/version-github-releases
+    paths:
+      - patches/apply-github-releases.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply-release-versioning:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Apply GitHub Release integration
+        run: python3 patches/apply-github-releases.py
+
+      - name: Validate solution
+        run: dotnet test Matgate.slnx --configuration Release
+
+      - name: Commit validated release integration
+        run: |
+          rm -f patches/apply-github-releases.py
+          rm -f .github/workflows/apply-github-releases.yml
+          rmdir patches 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Create versioned GitHub Releases"
+          git push origin HEAD
