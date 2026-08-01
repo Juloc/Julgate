@@ -322,6 +322,7 @@ public static class EndpointMapping
         app.MapGet("/account", AccountAsync).RequireAuthorization();
         app.MapGet("/about", AboutAsync).RequireAuthorization();
         app.MapPost("/account", UpdateAccountAsync).RequireAuthorization();
+        app.MapPost("/account/password", ChangeOwnPasswordAsync).RequireAuthorization();
         app.MapPost("/account/favorites/{id:guid}/toggle", ToggleFavoriteServerAsync).RequireAuthorization();
         app.MapPost("/api/tools/ping", ToolsPingAsync).RequireAuthorization();
         app.MapPost("/api/tools/lookup", ToolsLookupAsync).RequireAuthorization();
@@ -2703,6 +2704,81 @@ public static class EndpointMapping
         }
 
         return Results.Redirect(EmbedAwareRedirect(context, "/account"));
+    }
+
+    private static async Task<IResult> ChangeOwnPasswordAsync(
+        HttpContext context,
+        JsonDataStore store,
+        PasswordHasher hasher,
+        HtmlViews views)
+    {
+        var user = await RequireUserAsync(context, store);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        var form = await context.Request.ReadFormAsync(context.RequestAborted);
+        if (!ValidateCsrf(context, form))
+        {
+            return BadRequest(context, user, views);
+        }
+
+        var german = HtmlViews.Language(context) == "de";
+        var currentPassword = form["currentPassword"].ToString();
+        var newPassword = form["newPassword"].ToString();
+        var confirmPassword = form["confirmPassword"].ToString();
+
+        string? error = null;
+        if (!hasher.Verify(currentPassword, user.PasswordHash))
+        {
+            error = german
+                ? "Das aktuelle Passwort ist falsch."
+                : "The current password is incorrect.";
+        }
+        else if (newPassword.Length < 10)
+        {
+            error = german
+                ? "Das neue Passwort muss mindestens 10 Zeichen lang sein."
+                : "The new password must be at least 10 characters long.";
+        }
+        else if (hasher.Verify(newPassword, user.PasswordHash))
+        {
+            error = german
+                ? "Das neue Passwort muss sich vom aktuellen Passwort unterscheiden."
+                : "The new password must differ from the current password.";
+        }
+        else if (!string.Equals(newPassword, confirmPassword, StringComparison.Ordinal))
+        {
+            error = german
+                ? "Die neuen Passwörter stimmen nicht überein."
+                : "The new passwords do not match.";
+        }
+
+        if (error is not null)
+        {
+            return Results.Content(
+                views.Message(
+                    context,
+                    user,
+                    german ? "Passwort ändern" : "Change password",
+                    error),
+                "text/html");
+        }
+
+        await store.UpdateUsersAsync(users =>
+        {
+            var stored = users.FirstOrDefault(candidate => candidate.Id == user.Id);
+            if (stored is null)
+            {
+                return;
+            }
+
+            stored.PasswordHash = hasher.Hash(newPassword);
+            stored.UpdatedAt = DateTimeOffset.UtcNow;
+        }, context.RequestAborted);
+
+        return Results.Redirect(EmbedAwareRedirect(context, "/account?passwordChanged=1"));
     }
 
     private static async Task<IResult> ToggleFavoriteServerAsync(

@@ -7,8 +7,8 @@ Julgate keeps the existing Minimal API and JSON-file architecture. It does not r
 ## Current release
 
 ```text
-0.7.7
-ghcr.io/juloc/julgate:0.7.7
+0.7.8
+ghcr.io/juloc/julgate:0.7.8
 ```
 
 Production Compose files use the immutable version tag by default. The release workflow also publishes `latest` and `sha-<commit>`.
