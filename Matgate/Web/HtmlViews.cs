@@ -684,6 +684,8 @@ public sealed class HtmlViews
                     <td class="table-actions">{{FavoriteToggleForm(context, user, server, "/account")}}</td>
                 </tr>
                 """));
+        var german = Language(context) == "de";
+        var passwordChanged = context.Request.Query["passwordChanged"] == "1";
         var body = $$"""
             <section class="page-head">
                 <div>
@@ -709,6 +711,26 @@ public sealed class HtmlViews
                         </select>
                     </label>
                     <div class="actions"><button type="submit" class="primary">{{Icon("save")}}{{T(context, "Save")}}</button></div>
+                </form>
+            </section>
+            <section class="panel">
+                <h2>{{(german ? "Passwort ändern" : "Change password")}}</h2>
+                <p class="success{{(passwordChanged ? "" : " hidden")}}">
+                    {{(german ? "Das Passwort wurde geändert." : "The password was changed.")}}
+                </p>
+                <p class="muted">{{(german ? "Mindestens 10 Zeichen. Das neue Passwort muss sich vom bisherigen unterscheiden." : "At least 10 characters. The new password must differ from the current password.")}}</p>
+                <form method="post" action="/account/password" class="form-grid">
+                    {{Csrf(context)}}
+                    <label>{{(german ? "Aktuelles Passwort" : "Current password")}}
+                        <input type="password" name="currentPassword" autocomplete="current-password" required>
+                    </label>
+                    <label>{{(german ? "Neues Passwort" : "New password")}}
+                        <input type="password" name="newPassword" autocomplete="new-password" minlength="10" required>
+                    </label>
+                    <label>{{(german ? "Neues Passwort bestätigen" : "Confirm new password")}}
+                        <input type="password" name="confirmPassword" autocomplete="new-password" minlength="10" required>
+                    </label>
+                    <div class="actions"><button type="submit" class="primary">{{Icon("key")}}{{(german ? "Passwort ändern" : "Change password")}}</button></div>
                 </form>
             </section>
             <section class="panel">

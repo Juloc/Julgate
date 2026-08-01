@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.8 — 2026-08-01
+
+### Account security
+
+- Selectively port Matgate's self-service password change into Julgate's existing account page.
+- Require the current password, CSRF validation, a distinct new password of at least 10 characters and exact confirmation.
+- Keep Julgate's current authentication, credential encryption and deployment architecture unchanged.
+
 ## 0.7.7 — 2026-08-01
 
 ### Remote sessions
