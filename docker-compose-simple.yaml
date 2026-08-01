@@ -54,7 +54,7 @@ services:
     <<:
       - *home-dns
       - *default-security
-    image: ghcr.io/juloc/julgate:${JULGATE_VERSION:-0.7.0}
+    image: ghcr.io/juloc/julgate:${JULGATE_VERSION:-0.7.7}
     pull_policy: always
     environment:
       ASPNETCORE_URLS: http://+:8080
