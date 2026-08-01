@@ -11,7 +11,7 @@ Julgate keeps the existing Minimal API and JSON-file architecture. It does not r
 ghcr.io/juloc/julgate:0.7.8
 ```
 
-Production Compose files use the immutable version tag by default. The release workflow also publishes `latest` and `sha-<commit>`.
+Production Compose files use the immutable version tag by default. A Git tag such as `v0.7.8` publishes `0.7.8`, the compatible `0.7` tag, `latest` and `sha-<commit>`. The `main` branch publishes only `edge` and `sha-<commit>`, so stable package versions are never overwritten.
 
 ## Capabilities
 
