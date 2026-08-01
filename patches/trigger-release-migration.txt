@@ -1,1 +1,1 @@
-Apply the prepared GitHub Release integration.
+Apply the prepared GitHub Release integration on main.
