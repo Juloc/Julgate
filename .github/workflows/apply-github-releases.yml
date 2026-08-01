@@ -3,7 +3,7 @@ name: Apply GitHub Release versioning
 on:
   push:
     branches:
-      - agent/version-github-releases
+      - main
     paths:
       - "patches/**"
 
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Check out branch
+      - name: Check out main
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -39,4 +39,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Create versioned GitHub Releases"
-          git push origin HEAD
+          git push origin HEAD:main
