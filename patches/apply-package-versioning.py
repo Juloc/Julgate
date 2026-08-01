@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# The workflow file now exists; this commit triggers the migration job.
 ROOT = Path(__file__).resolve().parents[1]
 
 
