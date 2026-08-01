@@ -715,9 +715,9 @@ public sealed class HtmlViews
             </section>
             <section class="panel">
                 <h2>{{(german ? "Passwort ändern" : "Change password")}}</h2>
-                {{(passwordChanged
-                    ? $"<p class="success">{(german ? "Das Passwort wurde geändert." : "The password was changed.")}</p>"
-                    : "")}}
+                <p class="success{{(passwordChanged ? "" : " hidden")}}">
+                    {{(german ? "Das Passwort wurde geändert." : "The password was changed.")}}
+                </p>
                 <p class="muted">{{(german ? "Mindestens 10 Zeichen. Das neue Passwort muss sich vom bisherigen unterscheiden." : "At least 10 characters. The new password must differ from the current password.")}}</p>
                 <form method="post" action="/account/password" class="form-grid">
                     {{Csrf(context)}}

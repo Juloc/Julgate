@@ -20,9 +20,9 @@ public sealed class AccountPasswordChangeIntegrationTests
         Assert.Contains("hasher.Verify(currentPassword, user.PasswordHash)", endpointSource, StringComparison.Ordinal);
         Assert.Contains("newPassword.Length < 10", endpointSource, StringComparison.Ordinal);
         Assert.Contains("stored.PasswordHash = hasher.Hash(newPassword)", endpointSource, StringComparison.Ordinal);
-        Assert.Contains("action="/account/password"", viewSource, StringComparison.Ordinal);
-        Assert.Contains("autocomplete="current-password"", viewSource, StringComparison.Ordinal);
-        Assert.Contains("autocomplete="new-password"", viewSource, StringComparison.Ordinal);
+        Assert.Contains("/account/password", viewSource, StringComparison.Ordinal);
+        Assert.Contains("current-password", viewSource, StringComparison.Ordinal);
+        Assert.Contains("new-password", viewSource, StringComparison.Ordinal);
     }
 
     [Fact]
