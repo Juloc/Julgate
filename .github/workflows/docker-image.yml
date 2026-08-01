@@ -182,8 +182,15 @@ jobs:
             exit 1
           fi
 
+          if [[ ! "$base_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "VersionPrefix must be a stable semantic version such as 1.2.3."
+            exit 1
+          fi
+
+          major_minor="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
           build_time="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           publish=false
+          channel=ci
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
@@ -192,14 +199,19 @@ jobs:
               exit 1
             fi
             publish=true
+            channel=release
           elif [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            version="$base_version"
+            version="${base_version}-edge.${GITHUB_RUN_NUMBER}"
             publish=true
+            channel=edge
           else
             version="${base_version}-ci.${GITHUB_RUN_NUMBER}"
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "base_version=$base_version" >> "$GITHUB_OUTPUT"
+          echo "major_minor=$major_minor" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "build_time=$build_time" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
 
@@ -225,9 +237,11 @@ jobs:
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
-            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=${{ steps.version.outputs.base_version }},enable=${{ steps.version.outputs.channel == 'release' }}
+            type=raw,value=${{ steps.version.outputs.major_minor }},enable=${{ steps.version.outputs.channel == 'release' }}
+            type=raw,value=latest,enable=${{ steps.version.outputs.channel == 'release' }}
+            type=raw,value=edge,enable=${{ steps.version.outputs.channel == 'edge' }}
             type=sha,prefix=sha-
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and optionally push
         uses: docker/build-push-action@v6
