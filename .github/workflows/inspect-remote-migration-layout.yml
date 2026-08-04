@@ -15,15 +15,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: List migration-relevant files
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Probe anonymous package restore
         shell: bash
         run: |
           set -euo pipefail
-          echo '--- workflows ---'
-          find .github/workflows -maxdepth 1 -type f -printf '%f\n' | sort
-          echo '--- launcher tests and related files ---'
-          find Matgate.Tests -maxdepth 3 -type f \
-            \( -iname '*Guacamole*' -o -iname '*Launcher*' -o -iname '*Remote*' \) \
-            -printf '%p\n' | sort
-          echo '--- restore/build references ---'
-          grep -RInE 'dotnet (restore|build|test)|docker build|docker compose.*build' .github/workflows || true
+          probe="$RUNNER_TEMP/anonymous-package-probe"
+          feed="https://nuget.pkg.github.com/Juloc/index.json"
+          dotnet new classlib --name AnonymousPackageProbe --framework net10.0 --output "$probe"
+          dotnet add "$probe/AnonymousPackageProbe.csproj" package JulOS.Remote.Transport \
+            --version 0.1.0 \
+            --source "$feed"
+          dotnet restore "$probe/AnonymousPackageProbe.csproj" --source "$feed"
