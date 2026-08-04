@@ -16,34 +16,37 @@ public sealed class GuacamoleLauncherTests
     public async Task DesktopLaunchUsesSharedEncoderAndPreservesJulgateOptions()
     {
         var serverId = Guid.Parse("11111111-1111-4111-8111-111111111111");
-        var launcher = CreateLauncher();
-        var result = await launcher.CreateLaunchAsync(
+        var server = new ServerEndpoint
+        {
+            Id = serverId,
+            Name = "Desktop",
+            Protocol = ServerProtocol.Rdp,
+            Host = "host.example.test",
+            Port = 3389,
+            UserName = "remote-user",
+            Password = "remote-password",
+            Domain = "EXAMPLE",
+            KeyboardLayout = "de-de-qwertz",
+            IgnoreCertificate = true
+        };
+        var expectedConnectionName = GuacamoleConfigWriter.ConnectionName(server);
+        var result = await CreateLauncher().CreateLaunchAsync(
             new MatgateUser { UserName = "operator" },
-            new ServerEndpoint
-            {
-                Id = serverId,
-                Name = "Desktop",
-                Protocol = ServerProtocol.Rdp,
-                Host = "host.example.test",
-                Port = 3389,
-                UserName = "remote-user",
-                Password = "remote-password",
-                Domain = "EXAMPLE",
-                KeyboardLayout = "de-de-qwertz",
-                IgnoreCertificate = true
-            });
+            server);
 
         Assert.True(result.Success);
         Assert.Null(result.Error);
         Assert.NotNull(result.Url);
         Assert.StartsWith("/guacamole/#/client/", result.Url, StringComparison.Ordinal);
         Assert.NotNull(result.EncryptedData);
-        Assert.Equal("Desktop", result.ConnectionName);
+        Assert.Equal(expectedConnectionName, result.ConnectionName);
 
         using var document = DecryptAndVerify(result.EncryptedData!);
         var root = document.RootElement;
         Assert.Equal("operator", root.GetProperty("username").GetString());
-        var connection = root.GetProperty("connections").GetProperty("Desktop");
+        var connection = root
+            .GetProperty("connections")
+            .GetProperty(expectedConnectionName);
         Assert.Equal(RemoteTransportProtocols.Rdp, connection.GetProperty("protocol").GetString());
         var parameters = connection.GetProperty("parameters");
         Assert.Equal("host.example.test", parameters.GetProperty("hostname").GetString());
@@ -61,23 +64,26 @@ public sealed class GuacamoleLauncherTests
     [Fact]
     public async Task VncLaunchOmitsDesktopAndUserParameters()
     {
+        var server = new ServerEndpoint
+        {
+            Name = "Console",
+            Protocol = ServerProtocol.Vnc,
+            Host = "console.example.test",
+            Port = 5900,
+            UserName = "ignored-user",
+            Password = "vnc-password"
+        };
+        var expectedConnectionName = GuacamoleConfigWriter.ConnectionName(server);
         var result = await CreateLauncher().CreateLaunchAsync(
             new MatgateUser { UserName = "operator" },
-            new ServerEndpoint
-            {
-                Name = "Console",
-                Protocol = ServerProtocol.Vnc,
-                Host = "console.example.test",
-                Port = 5900,
-                UserName = "ignored-user",
-                Password = "vnc-password"
-            });
+            server);
 
         Assert.True(result.Success);
+        Assert.Equal(expectedConnectionName, result.ConnectionName);
         using var document = DecryptAndVerify(result.EncryptedData!);
         var parameters = document.RootElement
             .GetProperty("connections")
-            .GetProperty("Console")
+            .GetProperty(expectedConnectionName)
             .GetProperty("parameters");
         Assert.False(parameters.TryGetProperty("username", out _));
         Assert.False(parameters.TryGetProperty("domain", out _));
