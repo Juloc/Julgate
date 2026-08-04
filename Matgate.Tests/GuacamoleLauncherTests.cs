@@ -170,7 +170,16 @@ public sealed class GuacamoleLauncherTests
             try
             {
                 Assert.True(CryptographicOperations.FixedTimeEquals(signature, expected));
-                return JsonDocument.Parse(payload);
+                var payloadBytes = payload.ToArray();
+                try
+                {
+                    using var stream = new MemoryStream(payloadBytes, writable: false);
+                    return JsonDocument.Parse(stream);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(payloadBytes);
+                }
             }
             finally
             {
