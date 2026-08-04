@@ -1,17 +1,22 @@
+# syntax=docker/dockerfile:1.7
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 ARG JULGATE_VERSION=
 ARG MATGATE_VERSION=
 
+COPY NuGet.config ./
 COPY Matgate/Matgate.csproj Matgate/
-RUN dotnet restore Matgate/Matgate.csproj
+RUN --mount=type=secret,id=github_token,required=true \
+    token="$(cat /run/secrets/github_token)"; \
+    export NuGetPackageSourceCredentials_github="Username=Juloc;Password=${token};ValidAuthenticationTypes=Basic"; \
+    dotnet restore Matgate/Matgate.csproj --configfile /src/NuGet.config
 
 COPY Matgate/ Matgate/
 RUN version="${JULGATE_VERSION:-$MATGATE_VERSION}"; \
     if [ -n "$version" ]; then \
-      dotnet publish Matgate/Matgate.csproj -c Release -o /app/publish /p:UseAppHost=false /p:Version="$version" /p:InformationalVersion="$version"; \
+      dotnet publish Matgate/Matgate.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false /p:Version="$version" /p:InformationalVersion="$version"; \
     else \
-      dotnet publish Matgate/Matgate.csproj -c Release -o /app/publish /p:UseAppHost=false; \
+      dotnet publish Matgate/Matgate.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false; \
     fi
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

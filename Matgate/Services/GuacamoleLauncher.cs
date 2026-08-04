@@ -1,19 +1,26 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
+using JulOS.Remote.Transport;
 using Matgate.Models;
 
 namespace Matgate.Services;
 
 public sealed class GuacamoleLauncher
 {
-    private static readonly byte[] ZeroIv = new byte[16];
-
     private readonly IConfiguration _configuration;
+    private readonly GuacamoleJsonLaunchEncoder _encoder;
 
     public GuacamoleLauncher(IConfiguration configuration)
+        : this(configuration, new GuacamoleJsonLaunchEncoder())
+    {
+    }
+
+    public GuacamoleLauncher(
+        IConfiguration configuration,
+        GuacamoleJsonLaunchEncoder encoder)
     {
         _configuration = configuration;
+        _encoder = encoder;
     }
 
     public Task<GuacamoleLaunchResult> CreateLaunchAsync(
@@ -45,124 +52,62 @@ public sealed class GuacamoleLauncher
                 "Guacamole JSON auth secret is missing or invalid. Set Guacamole:JsonSecretKey / GUACAMOLE_JSON_SECRET_KEY to 32 hex characters."));
         }
 
-        var connectionName = GuacamoleConfigWriter.ConnectionName(server);
-        var sessionId = $"{server.Id:N}-{Guid.NewGuid():N}";
-        var payload = BuildJsonPayload(user, server, connectionName, sessionId);
-        var encryptedData = EncryptAndSign(payload, key);
-        var publicBasePath = _configuration["Guacamole:PublicBasePath"] ?? "/guacamole";
-        var directLaunch = _configuration.GetValue("Guacamole:DirectLaunch", true);
-
-        var url = directLaunch
-            ? $"{publicBasePath.TrimEnd('/')}/#/client/{Uri.EscapeDataString(ClientIdentifier(connectionName))}?data={Uri.EscapeDataString(encryptedData)}"
-            : $"{publicBasePath.TrimEnd('/')}/#/?data={Uri.EscapeDataString(encryptedData)}";
-
-        return Task.FromResult(GuacamoleLaunchResult.Ok(url, encryptedData, connectionName));
-    }
-
-    private string BuildJsonPayload(MatgateUser user, ServerEndpoint server, string connectionName, string sessionId)
-    {
-        var ttlMinutes = Math.Clamp(_configuration.GetValue("Guacamole:LaunchTtlMinutes", 2), 1, 30);
-        var parameters = new Dictionary<string, string>
+        byte[] passwordBytes = [];
+        try
         {
-            ["hostname"] = server.Host,
-            ["port"] = server.Port.ToString()
-        };
-
-        if (server.Protocol is ServerProtocol.Rdp or ServerProtocol.Ssh
-            && !string.IsNullOrWhiteSpace(server.UserName))
-        {
-            parameters["username"] = server.UserName;
-        }
-
-        if (!string.IsNullOrWhiteSpace(server.Password))
-        {
-            parameters["password"] = server.Password;
-        }
-
-        if (server.Protocol == ServerProtocol.Rdp)
-        {
-            if (!string.IsNullOrWhiteSpace(server.Domain))
+            if (!string.IsNullOrWhiteSpace(server.Password))
             {
-                parameters["domain"] = server.Domain;
+                passwordBytes = Encoding.UTF8.GetBytes(server.Password);
             }
 
-            parameters["security"] = "any";
-            parameters["ignore-cert"] = server.IgnoreCertificate ? "true" : "false";
-            parameters["server-layout"] = string.IsNullOrWhiteSpace(server.KeyboardLayout)
-                ? ServerEndpoint.DefaultKeyboardLayout
-                : server.KeyboardLayout.Trim();
-            parameters["resize-method"] = "reconnect";
-            parameters["enable-wallpaper"] = "false";
+            var connectionName = GuacamoleConfigWriter.ConnectionName(server);
+            var sessionId = $"{server.Id:N}-{Guid.NewGuid():N}";
+            var ttlMinutes = Math.Clamp(
+                _configuration.GetValue("Guacamole:LaunchTtlMinutes", 2),
+                1,
+                30);
+            var protocol = GuacamoleConfigWriter.ProtocolName(server.Protocol);
+            var isDesktop = server.Protocol == ServerProtocol.Rdp;
+            var request = new GuacamoleLaunchRequest(
+                CallerName: user.UserName,
+                ConnectionName: connectionName,
+                SessionId: sessionId,
+                Protocol: protocol,
+                Host: server.Host,
+                Port: server.Port,
+                UserName: server.UserName,
+                PasswordUtf8: passwordBytes,
+                Domain: server.Domain,
+                IgnoreCertificate: server.IgnoreCertificate,
+                KeyboardLayout: server.KeyboardLayout,
+                TerminalFontSize: server.TerminalFontSize,
+                EnableDrive: isDesktop,
+                DriveName: isDesktop ? "Matgate" : null,
+                DrivePath: isDesktop ? $"/drive/{server.Id:N}" : null,
+                ClientName: isDesktop ? "Matgate" : null,
+                ExpiresAtUtc: DateTimeOffset.UtcNow.AddMinutes(ttlMinutes));
+            var token = _encoder.Encode(request, key);
+            var publicBasePath = _configuration["Guacamole:PublicBasePath"] ?? "/guacamole";
+            var directLaunch = _configuration.GetValue("Guacamole:DirectLaunch", true);
+            var url = directLaunch
+                ? $"{publicBasePath.TrimEnd('/')}/#/client/{Uri.EscapeDataString(token.ClientIdentifier)}?data={Uri.EscapeDataString(token.EncryptedData)}"
+                : $"{publicBasePath.TrimEnd('/')}/#/?data={Uri.EscapeDataString(token.EncryptedData)}";
 
-            // Report as "Matgate" instead of the default "Guacamole" so Windows shows the
-            // redirected drive as "Matgate on Matgate" rather than "... on Guacamole".
-            parameters["client-name"] = "Matgate";
-
-            // Redirect a shared drive into the session so files can be transferred like real RDP
-            // (drag & drop / upload in Matgate). guacd stores the drive under drive-path.
-            parameters["enable-drive"] = "true";
-            parameters["drive-name"] = "Matgate";
-            parameters["create-drive-path"] = "true";
-            parameters["drive-path"] = $"/drive/{server.Id:N}";
+            return Task.FromResult(GuacamoleLaunchResult.Ok(
+                url,
+                token.EncryptedData,
+                token.ConnectionName));
         }
-        else if (server.Protocol == ServerProtocol.Vnc)
+        catch (ArgumentException)
         {
-            // Guacamole's VNC support uses the same shared password field and
-            // does not need any extra protocol-specific parameters for the
-            // standard outbound connection case.
+            return Task.FromResult(GuacamoleLaunchResult.Failed(
+                "The remote connection settings are invalid."));
         }
-        else if (server.Protocol == ServerProtocol.Ssh)
+        finally
         {
-            parameters["font-name"] = "monospace";
-            parameters["font-size"] = ServerEndpoint.NormalizeTerminalFontSize(server.TerminalFontSize).ToString();
+            CryptographicOperations.ZeroMemory(key);
+            CryptographicOperations.ZeroMemory(passwordBytes);
         }
-
-        var payload = new
-        {
-            username = user.UserName,
-            expires = DateTimeOffset.UtcNow.AddMinutes(ttlMinutes).ToUnixTimeMilliseconds(),
-            connections = new Dictionary<string, object>
-            {
-                [connectionName] = new
-                {
-                    id = sessionId,
-                    protocol = GuacamoleConfigWriter.ProtocolName(server.Protocol),
-                    parameters
-                }
-            }
-        };
-
-        return JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-    }
-
-    private static string EncryptAndSign(string json, byte[] key)
-    {
-        var jsonBytes = Encoding.UTF8.GetBytes(json);
-        byte[] signature;
-
-        using (var hmac = new HMACSHA256(key))
-        {
-            signature = hmac.ComputeHash(jsonBytes);
-        }
-
-        var signedPayload = new byte[signature.Length + jsonBytes.Length];
-        Buffer.BlockCopy(signature, 0, signedPayload, 0, signature.Length);
-        Buffer.BlockCopy(jsonBytes, 0, signedPayload, signature.Length, jsonBytes.Length);
-
-        using var aes = Aes.Create();
-        aes.Key = key;
-        aes.IV = ZeroIv;
-        aes.Mode = CipherMode.CBC;
-        aes.Padding = PaddingMode.PKCS7;
-
-        using var encryptor = aes.CreateEncryptor();
-        var encrypted = encryptor.TransformFinalBlock(signedPayload, 0, signedPayload.Length);
-        return Convert.ToBase64String(encrypted);
-    }
-
-    private static string ClientIdentifier(string connectionName)
-    {
-        return Convert.ToBase64String(Encoding.UTF8.GetBytes($"{connectionName}\0c\0json"));
     }
 
     private static bool TryReadHexKey(string? value, out byte[] key)

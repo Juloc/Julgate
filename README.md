@@ -38,6 +38,8 @@ Browser -> HTTPS reverse proxy -> Julgate edge
 
 Only the edge service is published. Julgate, Guacamole and `guacd` remain inside the Docker backend network. Julgate and `guacd` receive outbound access because they must contact configured targets.
 
+Guacamole JSON payload construction, protocol parameter mapping, HMAC signing and encryption come from the immutable `JulOS.Remote.Transport` `0.1.0` package. Julgate retains configuration, authorization, target-model mapping, TTL selection and launch-URL construction. Source builds restore that package from GitHub Packages; there is no vendored or fallback transport implementation in this repository.
+
 ## Security defaults
 
 - no default administrator password or fixed signing key
@@ -109,12 +111,19 @@ During credential-key rotation, add `docker-compose-key-rotation.yaml` for one v
 
 ## Local development
 
+Source builds require a GitHub token that can read the `JulOS.Remote.Transport` package. Keep the token outside the repository and export it only for the current shell:
+
 ```bash
+export JULGATE_GITHUB_PACKAGES_TOKEN='github-token-with-read-packages'
+export NuGetPackageSourceCredentials_github="Username=Juloc;Password=${JULGATE_GITHUB_PACKAGES_TOKEN};ValidAuthenticationTypes=Basic"
+
 dotnet restore Matgate.slnx
-dotnet build Matgate.slnx -c Release
-dotnet test Matgate.slnx -c Release
+dotnet build Matgate.slnx -c Release --no-restore
+dotnet test Matgate.slnx -c Release --no-build
 docker compose up --build -d
 ```
+
+`NuGet.config` maps only `JulOS.Remote.Transport` to GitHub Packages and maps all other dependencies to nuget.org. Docker receives `JULGATE_GITHUB_PACKAGES_TOKEN` only as a BuildKit secret during restore; it is not persisted in an image layer. GitHub Actions uses the repository-scoped `GITHUB_TOKEN` with `packages: read`.
 
 For local HTTP testing only:
 
@@ -165,6 +174,7 @@ Create an offline backup first. Losing the matching credential key makes stored 
 
 Pull requests and `main` execute:
 
+- authenticated restore of the immutable shared Remote transport package
 - .NET restore, build and unit tests
 - authorization-matrix and RDP/VNC/SSH launch tests
 - full hardened Compose startup and HTTP security smoke tests

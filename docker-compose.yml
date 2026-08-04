@@ -58,6 +58,8 @@ services:
     build:
       context: .
       dockerfile: Matgate/Dockerfile
+      secrets:
+        - github_token
       args:
         JULGATE_VERSION: ${JULGATE_VERSION:-0.7.0}
     environment:
@@ -132,6 +134,10 @@ services:
     networks:
       - backend
     restart: unless-stopped
+
+secrets:
+  github_token:
+    environment: JULGATE_GITHUB_PACKAGES_TOKEN
 
 volumes:
   data:
