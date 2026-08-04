@@ -1,4 +1,5 @@
 using System.Text;
+using JulOS.Remote.Transport;
 using Matgate.Services;
 using Matgate.Web;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -100,6 +101,7 @@ builder.Services.AddSingleton<CredentialProtector>();
 builder.Services.AddSingleton<JsonDataStore>();
 builder.Services.AddSingleton<SecurityAuditService>();
 builder.Services.AddSingleton<GuacamoleConfigWriter>();
+builder.Services.AddSingleton<GuacamoleJsonLaunchEncoder>();
 builder.Services.AddSingleton<HtmlViews>();
 builder.Services.AddSingleton<GuacamoleLauncher>();
 builder.Services.AddSingleton<NetworkToolsService>();
