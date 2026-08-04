@@ -9,6 +9,10 @@ on:
 
 permissions:
   contents: read
+  packages: read
+
+env:
+  NuGetPackageSourceCredentials_github: Username=${{ github.repository_owner }};Password=${{ secrets.GITHUB_TOKEN }};ValidAuthenticationTypes=Basic
 
 concurrency:
   group: julgate-file-protocols-${{ github.ref }}
