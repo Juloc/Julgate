@@ -10,6 +10,11 @@ public sealed class GuacamoleLauncher
     private readonly IConfiguration _configuration;
     private readonly GuacamoleJsonLaunchEncoder _encoder;
 
+    public GuacamoleLauncher(IConfiguration configuration)
+        : this(configuration, new GuacamoleJsonLaunchEncoder())
+    {
+    }
+
     public GuacamoleLauncher(
         IConfiguration configuration,
         GuacamoleJsonLaunchEncoder encoder)
