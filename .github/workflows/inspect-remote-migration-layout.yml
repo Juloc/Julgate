@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   inspect:
@@ -18,14 +19,23 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
-      - name: Probe anonymous package restore
+      - name: Probe repository token package restore
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          probe="$RUNNER_TEMP/anonymous-package-probe"
+          probe="$RUNNER_TEMP/repository-token-package-probe"
           feed="https://nuget.pkg.github.com/Juloc/index.json"
-          dotnet new classlib --name AnonymousPackageProbe --framework net10.0 --output "$probe"
-          dotnet add "$probe/AnonymousPackageProbe.csproj" package JulOS.Remote.Transport \
+          dotnet nuget add source \
+            --username Juloc \
+            --password "$GITHUB_TOKEN" \
+            --store-password-in-clear-text \
+            --valid-authentication-types basic \
+            --name github \
+            "$feed"
+          dotnet new classlib --name RepositoryTokenPackageProbe --framework net10.0 --output "$probe"
+          dotnet add "$probe/RepositoryTokenPackageProbe.csproj" package JulOS.Remote.Transport \
             --version 0.1.0 \
             --source "$feed"
-          dotnet restore "$probe/AnonymousPackageProbe.csproj" --source "$feed"
+          dotnet restore "$probe/RepositoryTokenPackageProbe.csproj" --source "$feed"
