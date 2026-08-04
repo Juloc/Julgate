@@ -1,0 +1,29 @@
+# Temporary branch-only inspection. Removed before review.
+
+name: Inspect Remote Migration Layout
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/inspect-remote-migration-layout.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: List migration-relevant files
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '--- workflows ---'
+          find .github/workflows -maxdepth 1 -type f -printf '%f\n' | sort
+          echo '--- launcher tests and related files ---'
+          find Matgate.Tests -maxdepth 3 -type f \
+            \( -iname '*Guacamole*' -o -iname '*Launcher*' -o -iname '*Remote*' \) \
+            -printf '%p\n' | sort
+          echo '--- restore/build references ---'
+          grep -RInE 'dotnet (restore|build|test)|docker build|docker compose.*build' .github/workflows || true
