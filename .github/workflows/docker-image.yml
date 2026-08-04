@@ -21,6 +21,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  NuGetPackageSourceCredentials_github: Username=${{ github.repository_owner }};Password=${{ secrets.GITHUB_TOKEN }};ValidAuthenticationTypes=Basic
 
 jobs:
   build:
@@ -34,6 +35,7 @@ jobs:
       - name: Validate Compose files
         env:
           JULGATE_GUACAMOLE_JSON_SECRET_KEY: fedcba98765432100123456789abcdef
+          JULGATE_GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -70,6 +72,7 @@ jobs:
       - name: Start hardened secret stack and smoke test
         env:
           JULGATE_GUACAMOLE_JSON_SECRET_KEY: fedcba98765432100123456789abcdef
+          JULGATE_GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JULGATE_BIND_ADDRESS: 127.0.0.1
           JULGATE_PORT: 8088
           JULGATE_REQUIRE_SECURE_COOKIES: "false"
@@ -252,6 +255,8 @@ jobs:
             JULGATE_VERSION=${{ steps.version.outputs.version }}
             JULGATE_BUILD_TAG=github
             JULGATE_BUILD_TIME=${{ steps.version.outputs.build_time }}
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           push: ${{ steps.version.outputs.publish == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
