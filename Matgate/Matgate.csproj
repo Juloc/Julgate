@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="JulOS.Remote.Transport" Version="0.1.0" />
     <PackageReference Include="FluentFTP" Version="54.1.2" />
     <PackageReference Include="SMBLibrary" Version="1.5.7" />
     <PackageReference Include="SSH.NET" Version="2025.1.0" />
