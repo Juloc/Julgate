@@ -1,0 +1,54 @@
+# Temporary branch-only migration runner. It removes every temporary workflow in the generated commit.
+
+name: Apply Remote Transport Migration V2
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/apply-remote-transport-migration-v2.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-remote-transport-migration-v2
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.repository == 'Juloc/Julgate' && github.head_ref == 'agent/use-julos-remote-transport-0.1.0'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the migration branch
+        uses: actions/checkout@v6
+        with:
+          ref: agent/use-julos-remote-transport-0.1.0
+          persist-credentials: true
+
+      - name: Execute the stored deterministic migration script
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('.github/workflows/apply-remote-transport-migration.yml').read_text(encoding='utf-8')
+          start_marker = "python3 - <<'PY'\n"
+          end_marker = "\n          PY\n"
+          if source.count(start_marker) != 1 or source.count(end_marker) != 1:
+              raise RuntimeError('Unable to locate the stored migration script exactly once.')
+          script = source.split(start_marker, 1)[1].split(end_marker, 1)[0]
+          exec(compile(textwrap.dedent(script), 'stored-remote-migration.py', 'exec'))
+          Path('.github/workflows/apply-remote-transport-migration-v2.yml').unlink()
+          PY
+
+          git diff --check
+          test ! -e .github/workflows/inspect-remote-migration-layout.yml
+          test ! -e .github/workflows/apply-remote-transport-migration.yml
+          test ! -e .github/workflows/apply-remote-transport-migration-v2.yml
+          git add --all
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "refactor(remote): use shared JulOS transport package"
+          git push origin HEAD:agent/use-julos-remote-transport-0.1.0
