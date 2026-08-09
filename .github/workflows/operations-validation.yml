@@ -70,14 +70,16 @@ jobs:
             exit 1
           fi
 
-      - name: Upload backup manifest
+      - name: Upload failed backup manifest
+        if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: julgate-restore-drill-manifest
           path: |
             artifacts/backup/manifest.env
             artifacts/backup/SHA256SUMS
-          retention-days: 14
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Remove test volumes
         if: always()
