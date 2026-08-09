@@ -112,14 +112,14 @@ jobs:
               --blame-hang \
               --blame-hang-timeout 3m
 
-      - name: Upload responsive screenshots
-        if: always()
+      - name: Upload failed responsive screenshots
+        if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: julgate-responsive-e2e
           path: artifacts/e2e
-          if-no-files-found: warn
-          retention-days: 14
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Show stack logs
         if: failure()
