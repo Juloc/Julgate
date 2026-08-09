@@ -22,6 +22,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   NuGetPackageSourceCredentials_github: Username=${{ github.repository_owner }};Password=${{ secrets.GITHUB_TOKEN }};ValidAuthenticationTypes=Basic
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
 
 jobs:
   build:
@@ -166,13 +167,14 @@ jobs:
             http://127.0.0.1:8088/login
           test -s artifacts/ui/julgate-login.png
 
-      - name: Upload UI smoke screenshot
+      - name: Upload failed UI smoke screenshot
+        if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: julgate-ui-smoke
           path: artifacts/ui/julgate-login.png
-          if-no-files-found: error
-          retention-days: 14
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Compute version
         id: version
